@@ -96,47 +96,70 @@ uses a browser to access n8n and the Playwright HTML report.
 
 ---
 
-### Linux server — first-time setup
+### Linux server — first-time setup (automated)
+
+Run this single command on the Linux box — it handles everything:
 
 ```bash
-# 1. Install Node.js (if not already — nvm recommended)
+bash <(curl -fsSL https://raw.githubusercontent.com/vkharish/agenticplaywright/main/setup-linux.sh)
+```
+
+The script will:
+1. Install nvm + Node.js 20 (if not already installed)
+2. Install pm2 globally
+3. Clone the repo (or pull latest if already cloned)
+4. Install all dependencies + Playwright chromium
+5. Prompt for your `ANTHROPIC_API_KEY` and write `bridge/.env`
+6. Start the bridge with pm2
+7. Optionally start n8n and the HTML report server
+8. Print the SSH tunnel command for your Windows laptop
+
+No Docker required.
+
+---
+
+### Linux server — manual setup (step by step)
+
+If you prefer to run each step yourself:
+
+```bash
+# 1. Install Node.js via nvm
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
 source ~/.bashrc
 nvm install 20
 
-# 2. Clone repo and install deps
+# 2. Clone repo
 git clone git@github.com:vkharish/agenticplaywright.git ~/anthropic
+
+# 3. Install root deps + Playwright browser
 cd ~/anthropic
 npm install
 npx playwright install chromium --with-deps
 
+# 4. Build bridge
 cd bridge
 npm install
 npm run build
 
-# 3. Configure environment
+# 5. Configure environment
 cp ~/anthropic/.env.example ~/anthropic/.env
-cp ~/anthropic/bridge/.env.example ~/anthropic/bridge/.env
-# Edit both files — fill in API keys and credentials
+# Edit ~/anthropic/.env — add your app credentials (username/password)
 
-# 4. Install pm2
+cat > ~/anthropic/bridge/.env << 'EOF'
+BRIDGE_API_KEY=dev-key
+ANTHROPIC_API_KEY=sk-ant-YOUR-KEY-HERE
+PORT=3000
+EOF
+
+# 6. Install pm2
 npm install -g pm2
-```
 
-### Linux server — start services
+# 7. Start bridge
+pm2 start npm --name bridge -- start --prefix ~/anthropic/bridge
 
-```bash
-cd ~/anthropic/bridge
-
-# Start bridge microservice
-pm2 start npm --name bridge -- start
-
-# Start n8n
+# 8. (Optional) start n8n and report server
 pm2 start npx --name n8n -- n8n
-
-# Start Playwright HTML report server (serves latest report)
-pm2 start "npx serve playwright-report -l 9323" --name report \
-  --cwd ~/anthropic
+pm2 start "npx serve playwright-report -l 9323" --name report --cwd ~/anthropic
 
 # Save so services restart on reboot
 pm2 save
