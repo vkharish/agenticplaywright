@@ -27,25 +27,64 @@ Everything runs on the Linux box. Windows laptop connects via SSH tunnel and use
 ## Project structure
 
 ```
-├── generate.js            Standalone spec generator (no bridge needed)
-├── setup-linux.sh         One-shot Linux setup script
-├── tests/zephyr/          Playwright spec files (generated + hand-authored)
-├── pages/                 Page Object Models (BasePage, LoginPage, CheckboxesPage, DropdownPage)
+├── generate.js                    Standalone spec generator — no bridge, no n8n needed
+├── setup-linux.sh                 One-shot Linux setup script (run once on a fresh box)
+├── Jenkinsfile                    Jenkins pipeline — run tests + auto-heal on failure
+├── playwright.config.ts           Multi-project config (public-chromium, chromium, firefox, mobile-chrome)
+├── .env.example                   Template — copy to .env, add app credentials
+│
+├── scripts/
+│   └── heal-on-failure.js         Parses junit.xml → calls bridge /heal → prints suggested fixes
+│
+├── tests/
+│   └── zephyr/
+│       ├── QA-INTERNET-01.spec.ts Login & Logout
+│       ├── QA-INTERNET-02.spec.ts Checkboxes
+│       ├── QA-INTERNET-03.spec.ts Dropdown
+│       ├── QA-INTERNET-04.spec.ts Invalid credentials error path
+│       └── QA-TEMPLATE.spec.ts    Template for new specs
+│
+├── pages/                         Page Object Models
+│   ├── BasePage.ts                navigate(), waitForLoad()
+│   ├── LoginPage.ts               login(), assertSecureArea()
+│   ├── CheckboxesPage.ts          toggleCheckbox(), assertStates()
+│   └── DropdownPage.ts            pickOption(), assertSelectedValue()
+│
 ├── utils/
-│   ├── env.ts             requireEnv(), appCredentials() — safe env var access
-│   └── zephyr.ts          zephyrStep(), zephyrExpected() — Zephyr step wrappers
-├── bridge/                Express microservice (needed for n8n integration)
+│   ├── env.ts                     requireEnv(), optionalEnv(), appCredentials(prefix)
+│   └── zephyr.ts                  zephyrStep(), zephyrExpected() — Zephyr step wrappers
+│
+├── bridge/                        Express microservice (needed for n8n + Jenkins heal)
 │   ├── src/
-│   │   ├── routes/        /health  /snapshot  /heal  /generate-spec  /write-spec
-│   │   ├── services/      browser.ts (Playwright singleton), claude.ts (Anthropic SDK)
-│   │   └── middleware/    apiKey.ts (x-api-key guard)
-│   ├── test-cases/        One .md file per application
-│   ├── n8n/               Importable n8n workflow JSONs + setup.sh
-│   ├── run-from-md.js     Spec generator using bridge HTTP API
-│   └── snapshots/         Saved DOM snapshots (gitignored)
-├── playwright.config.ts   Multi-project config (public-chromium, chromium, firefox, mobile-chrome)
-├── .env.example           Template — copy to .env and fill in secrets
-└── README.md              This file
+│   │   ├── index.ts               Entry point — loads dotenv, registers all routes
+│   │   ├── routes/
+│   │   │   ├── health.ts          GET  /health
+│   │   │   ├── snapshot.ts        POST /snapshot
+│   │   │   ├── heal.ts            POST /heal
+│   │   │   ├── generate.ts        POST /generate-spec  (needs ANTHROPIC_API_KEY)
+│   │   │   └── writeSpec.ts       POST /write-spec     (for n8n LLM node flow)
+│   │   ├── services/
+│   │   │   ├── browser.ts         Playwright singleton — one browser, many requests
+│   │   │   └── claude.ts          Anthropic SDK — generateSpec()
+│   │   ├── middleware/
+│   │   │   └── apiKey.ts          x-api-key header guard
+│   │   └── utils/
+│   │       └── aria.ts            ariaSnapshot parser → getByRole() suggestions
+│   ├── test-cases/
+│   │   ├── the-internet.md        Test cases for https://the-internet.herokuapp.com
+│   │   └── my-app.md              Template — edit this for your own app
+│   ├── n8n/
+│   │   ├── snapshot-workflow.json      Webhook → /snapshot → respond
+│   │   ├── heal-workflow.json          Webhook → /heal → respond
+│   │   ├── generate-specs-workflow.json Manual trigger → run-from-md.js
+│   │   ├── run-tests-workflow.json     Manual trigger → npx playwright test
+│   │   └── setup.sh                    Imports all 4 workflows via n8n API
+│   ├── run-from-md.js             Spec generator via bridge HTTP API (supports --snapshot-only)
+│   ├── run-from-md.sh             Bash version of run-from-md.js
+│   └── .env.example               Template — copy to bridge/.env, add ANTHROPIC_API_KEY
+│
+├── CONTEXT.md                     Full technical context for Claude (AI handoff document)
+└── PITCH.md                       Management pitch — ROI, roadmap, proof points
 ```
 
 ---
