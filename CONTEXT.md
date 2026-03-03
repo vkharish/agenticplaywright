@@ -370,14 +370,88 @@ File written to tests/zephyr/{testId}.spec.ts on Linux box
 - `setup-linux.sh` on a real Linux box
 - Corporate n8n integration
 - `/write-spec` endpoint
-- `/heal` endpoint in real CI scenario
+- `scripts/heal-on-failure.js` + `Jenkinsfile` in real Jenkins pipeline
 
 ### Next steps on office Linux box
 1. Run `setup-linux.sh`
 2. Test `generate.js bridge/test-cases/the-internet.md` — verify full pipeline
 3. Test `bridge/run-from-md.js bridge/test-cases/the-internet.md` — verify bridge flow
 4. Add office app to `bridge/test-cases/my-app.md`, run against real app
-5. Connect corporate n8n — build Option C workflow
+5. Connect Jenkins — add `Jenkinsfile` to Jenkins job, add secrets
+6. Connect corporate n8n — build Option C workflow
+
+---
+
+## Jenkins CI + Auto-Heal Integration
+
+### How it works
+
+```
+Jenkins runs: npx playwright test
+       ↓
+Tests fail → junit.xml written to test-results/
+       ↓
+Jenkins runs: node scripts/heal-on-failure.js
+       ↓
+Script reads junit.xml → extracts broken locator + URL from each failure
+       ↓
+Calls bridge POST /heal for each failure
+       ↓
+Prints suggested fixes in Jenkins build log
+Saves test-results/heal-suggestions.json (archived as Jenkins artifact)
+```
+
+### Files
+
+| File | Purpose |
+|------|---------|
+| `Jenkinsfile` | Jenkins pipeline — install, run tests, auto-heal, publish reports |
+| `scripts/heal-on-failure.js` | Parses junit.xml, calls /heal, outputs suggestions |
+
+### How heal-on-failure.js extracts the broken locator
+
+Playwright error output always includes the failing locator:
+```
+waiting for page.getByRole('button', { name: 'Sign in' })
+```
+The script uses regex to extract it from the `<failure>` block in junit.xml.
+
+### How it finds the URL
+
+Every generated spec file has this in the header comment:
+```
+ * Target URL     : https://myapp.com/login
+```
+The script reads the spec file and extracts the URL from that line.
+**This is why the Target URL header comment must always be present in spec files.**
+
+### Jenkins setup
+
+1. In Jenkins job → **Pipeline** → point to repo, `Jenkinsfile` path
+2. Add these credentials in **Manage Jenkins → Credentials**:
+   - `BRIDGE_API_KEY` — same value as in `bridge/.env`
+   - `APP_BASE_URL` — your app's base URL
+3. The bridge must be running on the Linux box (`pm2 status bridge`)
+4. Ensure the Jenkins agent runs on the same Linux box as the bridge (or set `BRIDGE_URL` to the bridge's IP)
+
+### Output
+
+After each failed run, Jenkins archives `test-results/heal-suggestions.json`:
+```json
+[
+  {
+    "testName": "QA-MYAPP-01 - Login test",
+    "status": "healed",
+    "brokenLocator": "page.getByRole('button', { name: 'Sign in' })",
+    "suggestedFix": "page.getByRole('button', { name: /Login/i })",
+    "explanation": "Button text changed from 'Sign in' to 'Login'",
+    "confidence": "high",
+    "url": "https://myapp.com/login"
+  }
+]
+```
+
+QA reviews the suggestions, updates the spec file, and re-runs.
 
 ---
 
@@ -410,6 +484,20 @@ curl http://localhost:3000/health
 # Pull latest and rebuild bridge
 git pull
 cd bridge && npm run build && pm2 restart bridge
+
+# Manually trigger auto-heal (after a failed test run)
+node scripts/heal-on-failure.js
+
+# Manually call /heal for a single broken locator
+curl -X POST http://localhost:3000/heal \
+  -H "x-api-key: dev-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://myapp.com/login",
+    "brokenLocator": "page.getByRole(\"button\", { name: \"Sign in\" })",
+    "errorMessage": "resolved to 0 elements",
+    "context": "login submit button"
+  }'
 ```
 
 ---
