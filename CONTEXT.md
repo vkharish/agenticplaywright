@@ -1,0 +1,424 @@
+# Claude Context Document — Agentic Playwright Framework
+
+This document is for Claude to understand the full project so work can continue
+seamlessly across sessions. Read this before touching any code.
+
+---
+
+## What this project is
+
+An AI-driven Playwright test framework that:
+1. Reads a `.md` file describing pages to test
+2. Uses Playwright to take a live DOM snapshot of each page (accessibility tree + locators)
+3. Sends the snapshot to Claude API → Claude writes a ready-to-run `.spec.ts` file
+4. The spec is saved to `tests/zephyr/` and run with `npx playwright test`
+
+No mocks. No hardcoded selectors. Tests are generated from the live DOM every time.
+
+---
+
+## Repository
+
+`git@github.com:vkharish/agenticplaywright.git`
+Cloned to `~/anthropic` on the Linux box.
+
+---
+
+## Tech stack
+
+| Layer | Technology |
+|-------|-----------|
+| Test runner | Playwright (TypeScript) |
+| Spec generator (standalone) | `generate.js` — Node.js + Playwright + Anthropic SDK |
+| Spec generator (via HTTP) | `bridge/` — Express microservice |
+| AI | Claude API (`claude-opus-4-6` default, `claude-sonnet-4-6` optional) |
+| Orchestration | n8n (corporate instance, connected later) |
+| Process manager | pm2 (Linux) |
+| Credentials | `.env` files — never committed |
+
+---
+
+## Architecture
+
+```
+Linux box
+├── bridge/          Express HTTP microservice (port 3000)
+│   └── pm2 process: "bridge"
+├── n8n              Workflow automation (port 5678) — corporate instance
+│   └── pm2 process: "n8n"  OR  corporate hosted n8n
+└── report server    npx serve playwright-report (port 9323)
+    └── pm2 process: "report"
+
+Windows laptop
+└── SSH tunnel → browser only
+    ssh -L 3000:localhost:3000 -L 5678:localhost:5678 -L 9323:localhost:9323 user@linux-box
+```
+
+**No Docker needed on Linux.** Docker was only used during early Mac development.
+
+---
+
+## Three ways to generate specs (understand all three)
+
+### Option A — `generate.js` standalone (simplest, no bridge needed)
+
+```bash
+node generate.js bridge/test-cases/the-internet.md
+```
+
+Flow: `.md file` → Playwright (direct) → Claude API → `.spec.ts`
+
+Use when: getting started, no n8n, testing locally.
+
+### Option B — Bridge + `run-from-md.js`
+
+```bash
+# Bridge must be running first
+node bridge/run-from-md.js bridge/test-cases/the-internet.md
+```
+
+Flow: `.md file` → HTTP → `bridge /snapshot` → `bridge /generate-spec` → `.spec.ts`
+
+Use when: n8n is wired up, or wanting persistent browser singleton.
+
+Also supports snapshot-only mode (no Claude API needed):
+```bash
+node bridge/run-from-md.js bridge/test-cases/the-internet.md --snapshot-only
+```
+
+### Option C — Corporate n8n LLM node (no API key on Linux box)
+
+n8n workflow: `bridge /snapshot` → LLM Node (corporate Claude) → `bridge /write-spec`
+
+Use when: corporate n8n has Claude access built in and API key is not user-accessible.
+
+---
+
+## Directory structure (every important file)
+
+```
+~/anthropic/
+│
+├── generate.js                  ← STANDALONE script. Playwright + Claude, no bridge.
+├── setup-linux.sh               ← One-shot Linux setup. Run once on a fresh box.
+├── playwright.config.ts         ← Multi-project Playwright config (see projects below)
+├── .env                         ← NOT committed. Copy from .env.example. App credentials here.
+├── .env.example                 ← Template. Committed.
+│
+├── tests/
+│   └── zephyr/
+│       ├── QA-INTERNET-01.spec.ts   Login & Logout (hand-authored)
+│       ├── QA-INTERNET-02.spec.ts   Checkboxes (hand-authored)
+│       ├── QA-INTERNET-03.spec.ts   Dropdown (hand-authored)
+│       ├── QA-INTERNET-04.spec.ts   Invalid credentials error path (hand-authored)
+│       └── QA-TEMPLATE.spec.ts      Template for new specs
+│
+├── pages/                       ← Page Object Models
+│   ├── BasePage.ts              ← navigate(), waitForLoad()
+│   ├── LoginPage.ts             ← usernameInput, passwordInput, loginButton, login()
+│   ├── CheckboxesPage.ts        ← checkboxes, assertStates()
+│   └── DropdownPage.ts          ← heading, dropdown, pickOption(), assertSelectedValue()
+│
+├── utils/
+│   ├── env.ts                   ← requireEnv(), optionalEnv(), appCredentials(prefix)
+│   └── zephyr.ts                ← zephyrStep(n, desc, fn), zephyrExpected(n, desc, fn)
+│
+└── bridge/                      ← Express microservice
+    ├── src/
+    │   ├── index.ts             ← Entry point. Loads dotenv, registers all routers.
+    │   ├── routes/
+    │   │   ├── health.ts        ← GET  /health → { status, browser }
+    │   │   ├── snapshot.ts      ← POST /snapshot → { accessibilityTree, suggestedLocators, ... }
+    │   │   ├── heal.ts          ← POST /heal → { suggestedFix, explanation, confidence }
+    │   │   ├── generate.ts      ← POST /generate-spec → { spec } (needs ANTHROPIC_API_KEY)
+    │   │   └── writeSpec.ts     ← POST /write-spec → writes testId.spec.ts to tests/zephyr/
+    │   ├── services/
+    │   │   ├── browser.ts       ← Playwright singleton. getBrowser(), newSession(), closeSession()
+    │   │   └── claude.ts        ← Anthropic SDK. generateSpec(params) → spec string
+    │   ├── middleware/
+    │   │   └── apiKey.ts        ← x-api-key header check against BRIDGE_API_KEY env var
+    │   └── utils/
+    │       └── aria.ts          ← extractLocatorsFromSnapshot(ariaYaml) → LocatorSuggestion[]
+    ├── test-cases/
+    │   ├── the-internet.md      ← Test cases for https://the-internet.herokuapp.com
+    │   └── my-app.md            ← Template for your own app — edit this
+    ├── snapshots/               ← Saved DOM snapshots (gitignored)
+    ├── n8n/
+    │   ├── snapshot-workflow.json      ← n8n: Webhook → /snapshot → respond
+    │   ├── heal-workflow.json          ← n8n: Webhook → /heal → respond
+    │   ├── generate-specs-workflow.json← n8n: Manual → executeCommand(run-from-md.js)
+    │   ├── run-tests-workflow.json     ← n8n: Manual → executeCommand(playwright test)
+    │   └── setup.sh                    ← Imports all 4 workflows via n8n public API v1
+    ├── run-from-md.js           ← Cross-platform. Calls bridge HTTP API. Supports --snapshot-only
+    ├── run-from-md.sh           ← Bash version
+    ├── package.json             ← Bridge deps: express, playwright, zod, @anthropic-ai/sdk, dotenv
+    ├── tsconfig.json
+    ├── Dockerfile               ← Not used on Linux. Was for Mac Docker workflow.
+    ├── docker-compose.yml       ← Not used on Linux. Was for Mac Docker workflow.
+    ├── .env                     ← NOT committed. ANTHROPIC_API_KEY + BRIDGE_API_KEY here.
+    └── .env.example             ← Template. Committed.
+```
+
+---
+
+## Playwright projects (playwright.config.ts)
+
+| Project | testMatch | Auth | baseURL |
+|---------|-----------|------|---------|
+| `public-chromium` | `QA-INTERNET-*.spec.ts` | None (login inside test) | `https://the-internet.herokuapp.com` |
+| `chromium` | all specs | `auth/storageState.json` | `process.env.BASE_URL` |
+| `firefox` | all specs | `auth/storageState.json` | `process.env.BASE_URL` |
+| `mobile-chrome` | all specs | `auth/storageState.json` | `process.env.BASE_URL` |
+| `setup` | `auth.setup.ts` | Runs first, saves session | — |
+
+For the-internet specs always use `--project=public-chromium`.
+For your own app use `--project=chromium`.
+
+---
+
+## Environment variables
+
+### `~/anthropic/.env`
+
+```
+BASE_URL=https://your-app.com
+TEST_USERNAME=generic_username
+TEST_PASSWORD=generic_password
+THE_INTERNET_USERNAME=tomsmith
+THE_INTERNET_PASSWORD=SuperSecretPassword!
+MY_APP_USERNAME=qa@yourcompany.com
+MY_APP_PASSWORD=your_password
+```
+
+### `~/anthropic/bridge/.env`
+
+```
+BRIDGE_API_KEY=dev-key
+ANTHROPIC_API_KEY=sk-ant-YOUR-KEY-HERE
+PORT=3000
+CLAUDE_MODEL=claude-opus-4-6    # optional, this is the default
+```
+
+---
+
+## Credentials pattern (important — always follow this)
+
+**In `.env`:** `<APP_PREFIX>_USERNAME` / `<APP_PREFIX>_PASSWORD`
+
+**In `.md` test case file:** `credentials: APP_PREFIX`
+
+**In generated `.spec.ts`:**
+```typescript
+import { appCredentials } from '../../utils/env';
+const { username, password } = appCredentials('APP_PREFIX');
+```
+
+Never hardcode credentials. Never use `process.env.THE_INTERNET_USERNAME` directly in specs — always go through `appCredentials()` or `requireEnv()`.
+
+---
+
+## Test case `.md` format
+
+```markdown
+# App Name
+
+## Page Name
+testId: QA-MYAPP-01
+url: https://myapp.com/login
+credentials: MY_APP
+description: What this page does and what to test
+```
+
+Fields:
+- `testId` — if omitted, auto-generates `QA-AUTO-01`
+- `url` — required
+- `credentials` — optional. Prefix maps to `<PREFIX>_USERNAME` / `<PREFIX>_PASSWORD` in `.env`
+- `description` — optional context passed to Claude
+
+---
+
+## Bridge API reference
+
+All endpoints except `/health` require header: `x-api-key: <BRIDGE_API_KEY>`
+
+### POST /snapshot
+```json
+Request:  { "url": "https://myapp.com/login" }
+Response: {
+  "success": true,
+  "title": "Page Title",
+  "finalUrl": "https://myapp.com/login",
+  "accessibilityTree": "- textbox \"Username\"\n- button \"Login\"...",
+  "suggestedLocators": [
+    { "element": "Textbox \"Username\"", "locator": "page.getByRole('textbox', { name: /Username/i })", "priority": 1 }
+  ],
+  "timestamp": "2026-03-03T..."
+}
+```
+
+### POST /heal
+```json
+Request: {
+  "url": "https://myapp.com/login",
+  "brokenLocator": "page.getByRole('button', { name: 'Sign in' })",
+  "errorMessage": "resolved to 0 elements",
+  "context": "login submit button"
+}
+Response: {
+  "success": true,
+  "suggestedFix": "page.getByRole('button', { name: /Login/i })",
+  "explanation": "Button text changed from 'Sign in' to 'Login'",
+  "confidence": "high"
+}
+```
+
+### POST /generate-spec
+```json
+Request: {
+  "testId": "QA-MYAPP-01",
+  "suiteName": "Login Page",
+  "description": "Main login form",
+  "url": "https://myapp.com/login",
+  "credentialsPrefix": "MY_APP",
+  "accessibilityTree": "...",
+  "suggestedLocators": [...]
+}
+Response: { "success": true, "spec": "import { test... }" }
+```
+
+### POST /write-spec
+```json
+Request:  { "testId": "QA-MYAPP-01", "spec": "import { test... }" }
+Response: { "success": true, "testId": "QA-MYAPP-01", "filePath": "...tests/zephyr/QA-MYAPP-01.spec.ts" }
+```
+
+---
+
+## Spec conventions (Claude must follow these when generating)
+
+1. **Imports** — always `import { test, expect } from '@playwright/test'`
+2. **Zephyr wrappers** — always `import { zephyrStep, zephyrExpected } from '../../utils/zephyr'`
+3. **No Page Objects in generated specs** — write locators inline
+4. **Locators** — only `getByRole()`, never CSS or XPath
+5. **Actions** — always wrapped in `await zephyrStep(n, 'description', async () => { ... })`
+6. **Assertions** — always wrapped in `await zephyrExpected(n, 'description', async () => { ... })`
+7. **Assertions use** — `toBeVisible()`, `toHaveValue()`, `toContainText()`, `toHaveURL()`
+8. **Credentials** — always via `appCredentials()`, never hardcoded
+9. **Spec header** — always the full comment block with Test ID, Suite, URL, Steps
+
+---
+
+## Playwright ariaSnapshot — critical implementation note
+
+`page.accessibility.snapshot()` was **removed in Playwright 1.58**.
+
+Use this instead:
+```typescript
+const ariaYaml = await page.locator('body').ariaSnapshot();
+```
+
+Returns a YAML-like string. Example output:
+```
+- heading "Login Page" [level=2]
+- textbox "Username"
+- textbox "Password"
+- button " Login"
+```
+
+This is parsed by `bridge/src/utils/aria.ts` → `extractLocatorsFromSnapshot()`.
+
+---
+
+## n8n integration notes
+
+**Corporate n8n** is on a separate Linux box, reachable from Windows browser.
+User does NOT have access to the underlying API keys in corporate n8n — they use the LLM node which has Claude access built in.
+
+**n8n API version:** Public API v1 at `/api/v1/workflows` with `X-N8N-API-KEY` header.
+Do NOT use `/rest/login` — it's unstable.
+
+**n8n HTTP Request node (v4.2) gotcha:**
+Use `contentType: "raw"` + `rawContentType: "application/json"` for JSON bodies.
+`contentType: "json"` sends it as a form key, not a JSON body.
+
+**`active` field is read-only** — remove it from workflow JSON before POST to API.
+
+**Workflow for corporate n8n (Option C):**
+```
+HTTP Request → POST bridge/snapshot
+  ↓ accessibilityTree + suggestedLocators
+LLM Node (Claude) → generate spec using the prompt from bridge/src/services/claude.ts
+  ↓ spec text
+HTTP Request → POST bridge/write-spec { testId, spec }
+  ↓
+File written to tests/zephyr/{testId}.spec.ts on Linux box
+```
+
+---
+
+## Current state (as of last session)
+
+### Working end-to-end ✅
+- `generate.js` — tested on the-internet.herokuapp.com, generates specs, runs 4/4 tests
+- `bridge/run-from-md.js --snapshot-only` — tested, 3/3 snapshots pass
+- All 4 existing specs pass: QA-INTERNET-01, 02, 03, 04
+- `setup-linux.sh` — written, pushed, not yet tested on actual Linux box
+- Bridge endpoints: /health, /snapshot, /heal, /generate-spec, /write-spec — all implemented
+
+### Not yet tested ⚠️
+- `generate.js` and `bridge/run-from-md.js` (full, with Claude) on office Linux box
+- `setup-linux.sh` on a real Linux box
+- Corporate n8n integration
+- `/write-spec` endpoint
+- `/heal` endpoint in real CI scenario
+
+### Next steps on office Linux box
+1. Run `setup-linux.sh`
+2. Test `generate.js bridge/test-cases/the-internet.md` — verify full pipeline
+3. Test `bridge/run-from-md.js bridge/test-cases/the-internet.md` — verify bridge flow
+4. Add office app to `bridge/test-cases/my-app.md`, run against real app
+5. Connect corporate n8n — build Option C workflow
+
+---
+
+## Common commands
+
+```bash
+# Generate specs — standalone (no bridge)
+node generate.js bridge/test-cases/the-internet.md
+
+# Generate specs — via bridge
+node bridge/run-from-md.js bridge/test-cases/the-internet.md
+
+# Snapshot only (no Claude API needed)
+node bridge/run-from-md.js bridge/test-cases/the-internet.md --snapshot-only
+
+# Run tests
+npx playwright test --project=public-chromium          # for the-internet specs
+npx playwright test --project=chromium                 # for your app specs
+npx playwright test tests/zephyr/QA-MYAPP-01.spec.ts  # single spec
+
+# View report
+npx playwright show-report
+
+# Bridge
+pm2 start npm --name bridge -- start --prefix ~/anthropic/bridge
+pm2 logs bridge
+pm2 restart bridge
+curl http://localhost:3000/health
+
+# Pull latest and rebuild bridge
+git pull
+cd bridge && npm run build && pm2 restart bridge
+```
+
+---
+
+## Things to never do
+
+- Never commit `.env` or `bridge/.env` — they are gitignored
+- Never hardcode credentials in spec files
+- Never use CSS or XPath locators — only `getByRole()`
+- Never use `page.accessibility.snapshot()` — use `page.locator('body').ariaSnapshot()`
+- Never add `"active": true/false` when POSTing workflows to n8n API — it's read-only
+- Never run `docker compose` on Linux — Docker is not needed there
