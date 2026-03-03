@@ -179,7 +179,104 @@ pm2 startup   # follow the printed instruction once
 
 ---
 
-## Day-by-day workflow
+## Windows laptop setup
+
+### Admin rights needed? — No, nothing requires admin
+
+| What | Admin needed? | Notes |
+|------|--------------|-------|
+| SSH tunnel | ❌ No | Built into Windows 10/11 — already installed |
+| Browser (Chrome/Edge/Firefox) | ❌ No | Already installed |
+| Node.js | ❌ No | Use portable ZIP — see below |
+| npm install | ❌ No | Once Node.js is set up |
+| Playwright browsers | ❌ No | Self-contained, no system install |
+| Git | ❌ No | Use portable ZIP from git-scm.com |
+
+---
+
+### Scenario A — Windows as browser only (recommended)
+
+Everything runs on the Linux box. Windows only needs a browser and SSH.
+
+**Step 1 — Open SSH tunnel in PowerShell (keep this running)**
+```powershell
+ssh -L 3000:localhost:3000 -L 5678:localhost:5678 -L 9323:localhost:9323 your-username@your-linux-box
+```
+
+SSH is built into Windows 10/11 — no install needed.
+
+**Step 2 — Open in browser**
+
+| URL | What it is |
+|-----|-----------|
+| http://localhost:5678 | n8n UI — trigger test generation and runs |
+| http://localhost:9323 | Playwright HTML report — view results |
+| http://localhost:3000/health | Bridge health check |
+
+That's it. No Node.js, no Git, nothing installed on Windows.
+
+---
+
+### Scenario B — Windows running scripts directly (no Linux box yet)
+
+If you want to run `generate.js` or tests directly on Windows before the Linux box is ready.
+
+**Step 1 — Install Node.js (no admin)**
+
+Download the **ZIP** (not the installer) from https://nodejs.org/en/download:
+- Choose: **Windows Binary (.zip)** → 64-bit
+- Extract to `C:\Users\YourName\node`
+- Add to PATH (no admin needed for user PATH):
+```powershell
+$env:PATH += ";C:\Users\YourName\node"
+# To make permanent — add to your PowerShell profile:
+Add-Content $PROFILE "`n`$env:PATH += `";C:\Users\YourName\node`""
+```
+
+**Step 2 — Install Git (no admin)**
+
+Download the **portable** version from https://git-scm.com/download/win:
+- Choose: **64-bit Git for Windows Portable**
+- Extract to `C:\Users\YourName\git`
+- Add `C:\Users\YourName\git\bin` to your PATH (same method above)
+
+**Step 3 — Clone repo and install deps**
+```powershell
+git clone git@github.com:vkharish/agenticplaywright.git C:\Users\YourName\anthropic
+cd C:\Users\YourName\anthropic
+npm install
+npx playwright install chromium
+
+cd bridge
+npm install
+npm run build
+```
+
+**Step 4 — Configure .env**
+```powershell
+copy .env.example .env
+# Edit .env in Notepad — add your credentials
+
+copy bridge\.env.example bridge\.env
+# Edit bridge\.env — add ANTHROPIC_API_KEY
+```
+
+**Step 5 — Run**
+```powershell
+# Generate specs
+node generate.js bridge\test-cases\the-internet.md
+
+# Run tests
+npx playwright test --project=public-chromium
+
+# View report
+npx playwright show-report
+```
+
+> **Note:** On Windows, use backslash `\` for file paths in commands,
+> or wrap paths in quotes: `node generate.js "bridge/test-cases/the-internet.md"`
+
+---
 
 ### Day 1 — Generate specs with standalone script (no bridge needed)
 
