@@ -7,7 +7,11 @@
  * the project's tests/zephyr/ folder.
  *
  * Usage:
- *   node run-from-md.js [path/to/test-cases.md]
+ *   node run-from-md.js [path/to/test-cases.md] [--snapshot-only]
+ *
+ * Flags:
+ *   --snapshot-only   Only take snapshots, skip spec generation.
+ *                     Use this to test the bridge without an API key.
  *
  * Windows:
  *   node bridge\run-from-md.js bridge\test-cases\my-app.md
@@ -21,12 +25,16 @@
 const fs   = require("fs");
 const path = require("path");
 
+const args         = process.argv.slice(2);
+const SNAPSHOT_ONLY = args.includes("--snapshot-only");
+const MD_ARG        = args.find(a => !a.startsWith("--"));
+
 const BRIDGE_URL   = process.env.BRIDGE_URL    ?? "http://localhost:3000";
 const API_KEY      = process.env.BRIDGE_API_KEY ?? "dev-key";
 const SCRIPT_DIR   = __dirname;
 const SPECS_OUT    = path.resolve(process.env.SPECS_OUT_DIR ?? path.join(SCRIPT_DIR, "..", "tests", "zephyr"));
 const SNAP_OUT     = path.join(SCRIPT_DIR, "snapshots");
-const MD_FILE      = path.resolve(process.argv[2] ?? path.join(SCRIPT_DIR, "test-cases", "the-internet.md"));
+const MD_FILE      = path.resolve(MD_ARG ?? path.join(SCRIPT_DIR, "test-cases", "the-internet.md"));
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -48,6 +56,7 @@ function slugify(str) {
 //   testId:      optional — auto-generated if missing
 //   url:         required
 //   description: optional
+//   credentials: optional — maps to <PREFIX>_USERNAME / <PREFIX>_PASSWORD in .env
 
 function parseMd(filePath) {
   const lines = fs.readFileSync(filePath, "utf8").split(/\r?\n/);
@@ -90,7 +99,7 @@ async function main() {
   }
 
   fs.mkdirSync(SNAP_OUT, { recursive: true });
-  fs.mkdirSync(SPECS_OUT, { recursive: true });
+  if (!SNAPSHOT_ONLY) fs.mkdirSync(SPECS_OUT, { recursive: true });
 
   const cases = parseMd(MD_FILE);
   if (cases.length === 0) {
@@ -107,7 +116,10 @@ async function main() {
     process.exit(1);
   }
 
-  console.log(`\nFound ${cases.length} test case(s) in ${MD_FILE}\n`);
+  if (SNAPSHOT_ONLY) {
+    console.log(`\n[snapshot-only mode — spec generation skipped]\n`);
+  }
+  console.log(`Found ${cases.length} test case(s) in ${MD_FILE}\n`);
 
   let passed = 0, failed = 0;
 
@@ -127,9 +139,17 @@ async function main() {
     const snapSlug = slugify(name);
     const snapFile = path.join(SNAP_OUT, `${snapSlug}.json`);
     fs.writeFileSync(snapFile, JSON.stringify({ ...snap, testCase: { testId, name, description } }, null, 2));
-    process.stdout.write(` ✓   Generate spec …`);
+    console.log(` ✓`);
+    console.log(`         → snapshots/${path.basename(snapFile)}`);
 
-    // 2. Generate spec via Claude
+    // 2. Generate spec via Claude (skipped in snapshot-only mode)
+    if (SNAPSHOT_ONLY) {
+      passed++;
+      console.log();
+      continue;
+    }
+
+    process.stdout.write(`         Generate spec …`);
     const gen = await post("/generate-spec", {
       testId,
       suiteName: name,
@@ -150,13 +170,16 @@ async function main() {
     const specFile = path.join(SPECS_OUT, `${testId}.spec.ts`);
     fs.writeFileSync(specFile, gen.spec, "utf8");
     console.log(` ✓`);
-    console.log(`         → snapshots/${path.basename(snapFile)}`);
     console.log(`         → tests/zephyr/${path.basename(specFile)}`);
     passed++;
     console.log();
   }
 
   console.log(`Done: ${passed} passed, ${failed} failed.`);
+  if (SNAPSHOT_ONLY) {
+    console.log(`\nSnapshots saved to: ${SNAP_OUT}`);
+    console.log(`Run without --snapshot-only when Claude API key is available to generate specs.`);
+  }
 }
 
 main().catch((err) => {
