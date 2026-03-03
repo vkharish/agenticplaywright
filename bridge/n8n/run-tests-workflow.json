@@ -1,0 +1,63 @@
+{
+  "name": "Bridge — Run Playwright Tests",
+  "nodes": [
+    {
+      "id": "node-manual-trigger-run",
+      "name": "Run manually",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "parameters": {}
+    },
+    {
+      "id": "node-exec-tests",
+      "name": "Run Tests",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [500, 300],
+      "parameters": {
+        "command": "cd $HOME/anthropic && npx playwright test --project=chromium --reporter=list 2>&1"
+      }
+    },
+    {
+      "id": "node-result-run",
+      "name": "Output",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [760, 300],
+      "parameters": {
+        "fields": {
+          "values": [
+            {
+              "name": "result",
+              "type": "stringValue",
+              "string": "={{ $json.stdout }}"
+            },
+            {
+              "name": "exitCode",
+              "type": "numberValue",
+              "number": "={{ $json.exitCode }}"
+            },
+            {
+              "name": "passed",
+              "type": "booleanValue",
+              "boolean": "={{ $json.exitCode === 0 }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Run manually": {
+      "main": [[{ "node": "Run Tests", "type": "main", "index": 0 }]]
+    },
+    "Run Tests": {
+      "main": [[{ "node": "Output", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

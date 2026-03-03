@@ -1,0 +1,58 @@
+{
+  "name": "Bridge — Generate Specs from MD",
+  "nodes": [
+    {
+      "id": "node-manual-trigger-gen",
+      "name": "Run manually",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "parameters": {}
+    },
+    {
+      "id": "node-exec-generate",
+      "name": "Generate Specs",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [500, 300],
+      "parameters": {
+        "command": "cd $HOME/anthropic && node bridge/run-from-md.js bridge/test-cases/the-internet.md 2>&1"
+      }
+    },
+    {
+      "id": "node-result-gen",
+      "name": "Output",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [760, 300],
+      "parameters": {
+        "fields": {
+          "values": [
+            {
+              "name": "result",
+              "type": "stringValue",
+              "string": "={{ $json.stdout }}"
+            },
+            {
+              "name": "exitCode",
+              "type": "numberValue",
+              "number": "={{ $json.exitCode }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Run manually": {
+      "main": [[{ "node": "Generate Specs", "type": "main", "index": 0 }]]
+    },
+    "Generate Specs": {
+      "main": [[{ "node": "Output", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

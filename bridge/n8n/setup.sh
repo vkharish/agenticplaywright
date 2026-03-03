@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Imports and activates both bridge workflows into n8n via the public API v1.
+# Imports and activates all bridge workflows into n8n via the public API v1.
 #
 # Requires N8N_API_KEY — create one in n8n UI:
 #   Settings (bottom-left) → API → Create an API key → copy it
@@ -44,8 +44,19 @@ import_workflow() {
 
 import_workflow "$SCRIPT_DIR/snapshot-workflow.json"
 import_workflow "$SCRIPT_DIR/heal-workflow.json"
+import_workflow "$SCRIPT_DIR/generate-specs-workflow.json"
+import_workflow "$SCRIPT_DIR/run-tests-workflow.json"
 
 echo ""
-echo "All done. Webhook URLs:"
+echo "All done."
+echo ""
+echo "Webhook URLs (called automatically by Zephyr / CI):"
 echo "  Snapshot : $N8N_URL/webhook/bridge-snapshot"
 echo "  Heal     : $N8N_URL/webhook/bridge-heal"
+echo ""
+echo "Manual workflows (run from Windows browser at $N8N_URL):"
+echo "  Generate Specs : Bridge — Generate Specs from MD"
+echo "  Run Tests      : Bridge — Run Playwright Tests"
+echo ""
+echo "HTML report (after running tests):"
+echo "  http://localhost:9323   (if report server is running — see README)"

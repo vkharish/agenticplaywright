@@ -84,30 +84,87 @@ PORT=3000
 
 ## Running
 
-### Mac — Docker
+### Architecture
 
-```bash
-cd bridge
-docker compose up -d
-
-# First time only — import n8n workflows
-N8N_API_KEY=<key-from-n8n-ui> bash n8n/setup.sh
+```
+Linux server  ──  bridge (port 3000) + n8n (port 5678) + report server (port 9323)
+Windows laptop ── SSH tunnel → browser only (no local install needed)
 ```
 
-### Linux server — pm2
+Everything runs on the Linux box. The Windows laptop connects via SSH tunnel and
+uses a browser to access n8n and the Playwright HTML report.
+
+---
+
+### Linux server — first-time setup
+
+```bash
+# 1. Install Node.js (if not already — nvm recommended)
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+source ~/.bashrc
+nvm install 20
+
+# 2. Clone repo and install deps
+git clone git@github.com:vkharish/agenticplaywright.git ~/anthropic
+cd ~/anthropic
+npm install
+npx playwright install chromium --with-deps
+
+cd bridge
+npm install
+npm run build
+
+# 3. Configure environment
+cp ~/anthropic/.env.example ~/anthropic/.env
+cp ~/anthropic/bridge/.env.example ~/anthropic/bridge/.env
+# Edit both files — fill in API keys and credentials
+
+# 4. Install pm2
+npm install -g pm2
+```
+
+### Linux server — start services
 
 ```bash
 cd ~/anthropic/bridge
+
+# Start bridge microservice
 pm2 start npm --name bridge -- start
+
+# Start n8n
 pm2 start npx --name n8n -- n8n
+
+# Start Playwright HTML report server (serves latest report)
+pm2 start "npx serve playwright-report -l 9323" --name report \
+  --cwd ~/anthropic
+
+# Save so services restart on reboot
+pm2 save
+pm2 startup   # follow the printed instruction once
 ```
 
-### Windows laptop (office)
+### Linux server — import n8n workflows (first time only)
 
-Just SSH tunnel — everything runs on the Linux server:
+In n8n UI (via SSH tunnel below): **Settings → API → Create an API key**
+
+```bash
+N8N_API_KEY=<key-from-n8n-ui> bash ~/anthropic/bridge/n8n/setup.sh
+```
+
+This imports and activates all 4 workflows.
+
+### Windows laptop — SSH tunnel
+
+Open PowerShell and keep this running whenever you work:
+
 ```powershell
-ssh -L 3000:localhost:3000 -L 5678:localhost:5678 user@your-linux-server
+ssh -L 3000:localhost:3000 -L 5678:localhost:5678 -L 9323:localhost:9323 user@your-linux-server
 ```
+
+Then open in your browser:
+- **n8n UI**: http://localhost:5678
+- **HTML report**: http://localhost:9323
+- **Bridge health**: http://localhost:3000/health
 
 ---
 
@@ -222,10 +279,15 @@ Three reporters run automatically on every test run:
 | `junit` | `test-results/junit.xml` | CI integration (Jenkins, GitHub Actions, Azure DevOps) |
 
 ```bash
-npx playwright show-report   # open HTML report in browser
+npx playwright show-report   # open HTML report in browser (local)
 ```
 
-On the Linux server, copy the report to your laptop:
+On Linux with pm2 report server running, view from any Windows browser via SSH tunnel:
+```
+http://localhost:9323
+```
+
+Or copy the report to your laptop:
 ```powershell
 scp -r user@linux-server:~/anthropic/playwright-report C:\Users\you\Desktop\
 ```
@@ -234,24 +296,34 @@ scp -r user@linux-server:~/anthropic/playwright-report C:\Users\you\Desktop\
 
 ## n8n workflows
 
-| Workflow | Webhook URL | Trigger |
-|----------|-------------|---------|
-| Snapshot | `http://localhost:5678/webhook/bridge-snapshot` | Zephyr test created |
-| Heal | `http://localhost:5678/webhook/bridge-heal` | CI test failure |
+| Workflow | How to trigger | What it does |
+|----------|---------------|--------------|
+| **Snapshot** | Webhook `POST /webhook/bridge-snapshot` | Takes a live DOM snapshot of a URL |
+| **Heal** | Webhook `POST /webhook/bridge-heal` | Suggests a fix for a broken locator |
+| **Generate Specs** | Click "Run" in n8n UI | Reads `.md` file → snapshots → Claude → writes `.spec.ts` files |
+| **Run Tests** | Click "Run" in n8n UI | Runs `npx playwright test` on the Linux box |
 
-n8n UI: **http://localhost:5678** (credentials set during first-run setup)
+n8n UI: **http://localhost:5678** (via SSH tunnel from Windows)
+
+### Typical Windows-browser workflow
+
+1. Open http://localhost:5678 in your browser
+2. Open **"Bridge — Generate Specs from MD"** → click **Run** → specs are generated on Linux
+3. Open **"Bridge — Run Playwright Tests"** → click **Run** → tests execute on Linux
+4. Open http://localhost:9323 to view the HTML report in your browser
 
 ---
 
 ## Git workflow
 
 ```bash
-# After changes on Mac
+# On Linux server — after making changes
 git add .
 git commit -m "describe your change"
 git push
 
-# On Linux server — pull latest
+# Pull latest (e.g. after editing on another machine)
 git pull
-cd bridge && npm run build   # only if bridge source changed
+cd bridge && npm run build   # only if bridge/ source changed
+pm2 restart bridge           # apply the new build
 ```
