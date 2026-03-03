@@ -239,9 +239,23 @@ npx playwright show-report
 | GET | `/health` | None | Service + browser status |
 | POST | `/snapshot` | `x-api-key` | DOM snapshot + locators |
 | POST | `/heal` | `x-api-key` | Fix a broken locator |
-| POST | `/generate-spec` | `x-api-key` | Snapshot → Claude → `.spec.ts` |
+| POST | `/generate-spec` | `x-api-key` | Snapshot → Claude API → `.spec.ts` (needs `ANTHROPIC_API_KEY`) |
+| POST | `/write-spec` | `x-api-key` | Write a spec file to disk (for n8n LLM node flow) |
 
 All requests except `/health` require header: `x-api-key: <BRIDGE_API_KEY>`
+
+### Two ways to generate specs
+
+**Option A — bridge calls Claude directly** (needs `ANTHROPIC_API_KEY` in `bridge/.env`):
+```
+run-from-md.js → /snapshot → /generate-spec → writes .spec.ts
+```
+
+**Option B — corporate n8n with LLM node** (no API key needed on Linux box):
+```
+n8n: /snapshot → LLM Node (Claude, corporate key) → /write-spec → .spec.ts written to disk
+```
+Use Option B when your n8n instance has Claude access built in.
 
 ### Example — snapshot
 

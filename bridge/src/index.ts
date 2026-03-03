@@ -5,14 +5,16 @@ import healthRouter from "./routes/health";
 import snapshotRouter from "./routes/snapshot";
 import healRouter from "./routes/heal";
 import generateRouter from "./routes/generate";
+import writeSpecRouter from "./routes/writeSpec";
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: "2mb" }));
 
 app.use(healthRouter);
 app.use(snapshotRouter);
 app.use(healRouter);
 app.use(generateRouter);
+app.use(writeSpecRouter);
 
 const PORT = Number(process.env.PORT ?? 3000);
 
