@@ -67,7 +67,8 @@ For a team maintaining **100 test cases** with monthly UI changes:
 
 ## Risk Reduction
 
-- **Self-healing CI** — when a test fails, the framework suggests a fix. QA reviews and approves. No more test debt accumulating silently.
+- **Jenkins auto-heal** — when a test fails in Jenkins, the pipeline automatically calls the AI to diagnose the broken locator, suggests the fix in the build log, and saves it as a downloadable artifact. QA reviews, updates one line, re-runs. No debugging, no DOM inspection.
+- **Zero silent test debt** — failures are never left as "flaky" and ignored. Every failure produces an AI-suggested fix within the same Jenkins build.
 - **No knowledge lock-in** — specs are plain TypeScript. Any developer or QA can read, modify, and understand them. AI is only involved at generation time.
 - **No vendor lock-in** — built on Playwright (Microsoft, open source), standard TypeScript, and the Anthropic API. Each layer is independently replaceable.
 - **Credentials never exposed** — all usernames and passwords live in `.env` files, never in code, never committed to Git.
@@ -78,12 +79,32 @@ For a team maintaining **100 test cases** with monthly UI changes:
 
 | Phase | What it delivers | Status |
 |-------|-----------------|--------|
-| **Phase 1** (now) | Generate tests from `.md` file, run on Linux, view HTML report from Windows browser | ✅ Working |
-| **Phase 2** (next) | Connect corporate n8n — trigger generation from Windows browser, no terminal needed | 🔄 In progress |
-| **Phase 3** | Zephyr webhook → test auto-generated when QA creates a test case in Jira | Planned |
-| **Phase 4** | CI self-healing — broken test in Jenkins/GitHub Actions → AI suggests fix → auto PR | Planned |
+| **Phase 1** | Generate tests from `.md` file, run on Linux, view HTML report from Windows browser | ✅ Done |
+| **Phase 2** | Jenkins CI — run tests automatically, auto-heal broken locators on failure | ✅ Done |
+| **Phase 3** | Connect corporate n8n — trigger generation from Windows browser, no terminal needed | 🔄 In progress |
+| **Phase 4** | Zephyr webhook → test auto-generated when QA creates a test case in Jira | Planned |
 
-**Phase 3 impact:** When a tester creates a test case in Zephyr, the test is automatically generated, committed, and queued to run — with zero manual steps. Coverage keeps pace with the sprint.
+### Jenkins auto-heal — how it works
+
+```
+Jenkins runs tests
+      ↓
+A test fails (e.g. button label changed from "Sign in" to "Login")
+      ↓
+Jenkins automatically calls AI with the broken locator + live page
+      ↓
+AI visits the page, reads current DOM, suggests the correct locator
+      ↓
+Fix printed in Jenkins build log + saved as downloadable artifact
+      ↓
+QA reviews suggestion, updates one line in the spec, re-runs — done
+```
+
+**Before this framework:** QA engineer opens browser, manually inspects DOM, figures out what changed, updates the locator — 30–60 minutes per broken test.
+
+**With this framework:** Jenkins does it automatically. QA just reviews and approves — 2 minutes.
+
+**Phase 4 impact:** When a tester creates a test case in Zephyr, the test is automatically generated, committed, and queued to run — with zero manual steps. Coverage keeps pace with the sprint.
 
 ---
 
@@ -96,7 +117,9 @@ For a team maintaining **100 test cases** with monthly UI changes:
 ## Technical Proof Points (for engineering leadership)
 
 - Framework has been tested end-to-end on a public test site — **4/4 tests pass**
+- Jenkins pipeline (`Jenkinsfile`) is ready to plug into your existing Jenkins instance
+- Auto-heal script (`scripts/heal-on-failure.js`) parses Jenkins JUnit results and calls AI — no manual intervention needed
 - Generated locators use `getByRole()` (WCAG-aligned, refactor-resistant)
 - Runs headless on Linux, report viewable from Windows via SSH tunnel — **no special tooling needed on the Windows laptop**
 - All credentials managed via `.env` — **nothing sensitive in source control**
-- Built on tools the team already knows: Playwright, TypeScript, Node.js
+- Built on tools the team already knows: Playwright, TypeScript, Node.js, Jenkins
