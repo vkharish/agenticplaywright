@@ -1,0 +1,53 @@
+version: "3.9"
+
+networks:
+  bridge-net:
+    driver: bridge
+
+volumes:
+  n8n_data:
+
+services:
+  bridge:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - BRIDGE_API_KEY=${BRIDGE_API_KEY:-dev-key}
+      - PORT=3000
+    restart: unless-stopped
+    networks:
+      - bridge-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  n8n:
+    image: n8nio/n8n:latest
+    ports:
+      - "5678:5678"
+    environment:
+      # Reachable from workflow expressions via $env.BRIDGE_URL / $env.BRIDGE_API_KEY
+      - BRIDGE_URL=http://bridge:3000
+      - BRIDGE_API_KEY=${BRIDGE_API_KEY:-dev-key}
+      # n8n instance settings
+      - N8N_HOST=0.0.0.0
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - WEBHOOK_URL=http://localhost:5678/
+      # Allow workflows to read env vars via $env.BRIDGE_API_KEY
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
+      # Persist encryption key so credentials survive restarts
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY:-changeme-32-char-encryption-key!}
+    volumes:
+      - n8n_data:/home/node/.n8n
+    networks:
+      - bridge-net
+    depends_on:
+      bridge:
+        condition: service_healthy
+    restart: unless-stopped

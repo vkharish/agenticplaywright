@@ -1,0 +1,30 @@
+# ── Dependencies ────────────────────────────────────────────────────────────
+node_modules/
+
+# ── Build output ─────────────────────────────────────────────────────────────
+dist/
+bridge/dist/
+
+# ── Playwright ───────────────────────────────────────────────────────────────
+playwright-report/
+test-results/
+.playwright/
+
+# Auth state (contains session cookies — never commit)
+auth/storageState.json
+
+# ── Environment files (contain real secrets) ─────────────────────────────────
+.env
+*.env
+!.env.example
+bridge/.env
+!bridge/.env.example
+
+# ── Bridge runtime output ─────────────────────────────────────────────────────
+bridge/snapshots/
+
+# ── OS / editor ──────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/settings.json
+*.save
