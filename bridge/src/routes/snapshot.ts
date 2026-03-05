@@ -3,6 +3,7 @@ import { z } from "zod";
 import { newSession, closeSession } from "../services/browser";
 import { requireApiKey } from "../middleware/apiKey";
 import { extractLocatorsFromSnapshot } from "../utils/aria";
+import { executeSteps } from "../utils/steps";
 
 const router = Router();
 
@@ -15,6 +16,12 @@ const SnapshotSchema = z.object({
   auth: z
     .object({ username: z.string(), password: z.string() })
     .optional(),
+  // Form-based credentials used by the 'login' step
+  credentials: z
+    .object({ username: z.string(), password: z.string() })
+    .optional(),
+  // Navigation steps to execute before snapshotting (Approach 3)
+  steps: z.array(z.string()).optional(),
 });
 
 router.post("/snapshot", requireApiKey, async (req: Request, res: Response) => {
@@ -24,11 +31,18 @@ router.post("/snapshot", requireApiKey, async (req: Request, res: Response) => {
     return;
   }
 
-  const { url, waitFor, auth } = parsed.data;
+  const { url, waitFor, auth, steps, credentials } = parsed.data;
   const session = await newSession(auth);
 
   try {
     await session.page.goto(url, { waitUntil: waitFor });
+
+    if (steps && steps.length > 0) {
+      await executeSteps(session.page, steps, credentials);
+    }
+
+    await session.page.waitForTimeout(500); // let page settle after navigation/steps
+
     const title = await session.page.title();
     const finalUrl = session.page.url();
 

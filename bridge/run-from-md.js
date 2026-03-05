@@ -25,6 +25,10 @@
 const fs   = require("fs");
 const path = require("path");
 
+// Load .env files so credentials prefix (e.g. THE_INTERNET_USERNAME) can be resolved
+try { require("dotenv").config({ path: path.resolve(__dirname, "..", ".env") }); } catch (_) {}
+try { require("dotenv").config({ path: path.resolve(__dirname, ".env") }); } catch (_) {}
+
 const args         = process.argv.slice(2);
 const SNAPSHOT_ONLY = args.includes("--snapshot-only");
 const MD_ARG        = args.find(a => !a.startsWith("--"));
@@ -57,12 +61,14 @@ function slugify(str) {
 //   url:         required
 //   description: optional
 //   credentials: optional — maps to <PREFIX>_USERNAME / <PREFIX>_PASSWORD in .env
+//   steps:       optional multi-line block — each '  - step' line is one step
 
 function parseMd(filePath) {
-  const lines = fs.readFileSync(filePath, "utf8").split(/\r?\n/);
-  const cases = [];
-  let cur = null;
-  let autoIdx = 1;
+  const lines   = fs.readFileSync(filePath, "utf8").split(/\r?\n/);
+  const cases   = [];
+  let cur       = null;
+  let autoIdx   = 1;
+  let inSteps   = false;
 
   const flush = () => {
     if (cur?.url) {
@@ -72,18 +78,28 @@ function parseMd(filePath) {
   };
 
   for (const line of lines) {
-    const heading      = line.match(/^##\s+(.+)/);
-    const testIdLine   = line.match(/^testId:\s+(.+)/);
-    const urlLine      = line.match(/^url:\s+(.+)/);
-    const descLine     = line.match(/^description:\s+(.+)/);
-    const credLine     = line.match(/^credentials:\s+(.+)/);
+    const heading    = line.match(/^##\s+(.+)/);
+    const testIdLine = line.match(/^testId:\s+(.+)/);
+    const urlLine    = line.match(/^url:\s+(.+)/);
+    const descLine   = line.match(/^description:\s+(.+)/);
+    const credLine   = line.match(/^credentials:\s+(.+)/);
+    const stepsLine  = line.match(/^steps:\s*$/);
+    const stepItem   = line.match(/^\s+-\s+(.+)/);
 
-    if (heading)    { flush(); cur = { name: heading[1].trim(), testId: "", url: "", description: "", credentialsPrefix: "" }; }
-    else if (cur) {
-      if (testIdLine) cur.testId            = testIdLine[1].trim();
-      if (urlLine)    cur.url               = urlLine[1].trim();
-      if (descLine)   cur.description       = descLine[1].trim();
-      if (credLine)   cur.credentialsPrefix = credLine[1].trim();
+    if (heading) {
+      flush();
+      cur = { name: heading[1].trim(), testId: "", url: "", description: "", credentialsPrefix: "", steps: [] };
+      inSteps = false;
+    } else if (cur) {
+      if (inSteps) {
+        if (stepItem) cur.steps.push(stepItem[1].trim());
+      } else {
+        if (stepsLine)       inSteps = true;
+        else if (testIdLine) cur.testId            = testIdLine[1].trim();
+        else if (urlLine)    cur.url               = urlLine[1].trim();
+        else if (descLine)   cur.description       = descLine[1].trim();
+        else if (credLine)   cur.credentialsPrefix = credLine[1].trim();
+      }
     }
   }
   flush();
@@ -124,13 +140,25 @@ async function main() {
   let passed = 0, failed = 0;
 
   for (let i = 0; i < cases.length; i++) {
-    const { testId, name, url, description, credentialsPrefix } = cases[i];
+    const { testId, name, url, description, credentialsPrefix, steps } = cases[i];
     console.log(`  [${i + 1}/${cases.length}] ${testId} — ${name}`);
     console.log(`         ${description}`);
+    if (steps.length > 0) console.log(`         Steps: ${steps.join(" → ")}`);
     process.stdout.write(`         Snapshot …`);
 
-    // 1. Snapshot
-    const snap = await post("/snapshot", { url });
+    // Resolve form credentials from env (used by 'login' step)
+    let credentials;
+    if (credentialsPrefix) {
+      const username = process.env[`${credentialsPrefix}_USERNAME`];
+      const password = process.env[`${credentialsPrefix}_PASSWORD`];
+      if (username && password) credentials = { username, password };
+    }
+
+    // 1. Snapshot (bridge executes steps before snapshotting)
+    const snapBody = { url };
+    if (steps.length > 0) snapBody.steps = steps;
+    if (credentials)      snapBody.credentials = credentials;
+    const snap = await post("/snapshot", snapBody);
     if (!snap.success) {
       console.log(` ✗  ${snap.error}`);
       failed++;

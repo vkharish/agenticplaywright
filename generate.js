@@ -62,12 +62,72 @@ function extractLocators(snapshot) {
   return results;
 }
 
+// ── execute flow steps before snapshotting ───────────────────────────────────
+async function executeSteps(page, steps, credentials) {
+  for (const raw of steps) {
+    const step = raw.trim();
+
+    if (step === "login") {
+      if (!credentials) throw new Error("Step 'login' requires credentials but none provided. Set credentials: in your .md file.");
+      await page.getByRole("textbox", { name: /username|email|user/i }).fill(credentials.username);
+      await page.getByRole("textbox", { name: /password/i }).fill(credentials.password);
+      await page.getByRole("button", { name: /log.?in|sign.?in|submit/i }).click();
+      await page.waitForLoadState("domcontentloaded");
+      continue;
+    }
+
+    if (step.startsWith("click:")) {
+      const text   = step.slice("click:".length).trim();
+      const nameRe = new RegExp(text, "i");
+      const roles  = ["button", "link", "tab", "menuitem", "option"];
+      let clicked  = false;
+      for (const role of roles) {
+        const loc = page.getByRole(role, { name: nameRe });
+        if (await loc.count() > 0) { await loc.first().click(); clicked = true; break; }
+      }
+      if (!clicked) await page.getByText(text, { exact: false }).first().click();
+      await page.waitForLoadState("domcontentloaded");
+      continue;
+    }
+
+    if (step.startsWith("navigate:")) {
+      await page.goto(step.slice("navigate:".length).trim(), { waitUntil: "domcontentloaded" });
+      continue;
+    }
+
+    if (step.startsWith("fill:")) {
+      const rest = step.slice("fill:".length).trim();
+      const pipe = rest.indexOf("|");
+      if (pipe === -1) throw new Error(`'fill:' needs 'fill: <label> | <value>'. Got: ${step}`);
+      await page.getByRole("textbox", { name: new RegExp(rest.slice(0, pipe).trim(), "i") })
+                .fill(rest.slice(pipe + 1).trim());
+      continue;
+    }
+
+    if (step === "wait") { await page.waitForLoadState("networkidle"); continue; }
+
+    if (step.startsWith("wait:")) {
+      const ms = parseInt(step.slice("wait:".length).trim(), 10);
+      if (isNaN(ms)) throw new Error(`'wait:<ms>' expects a number. Got: ${step}`);
+      await page.waitForTimeout(ms);
+      continue;
+    }
+
+    throw new Error(`Unknown step: "${step}". Supported: login | click:<text> | navigate:<url> | fill:<label>|<value> | wait | wait:<ms>`);
+  }
+}
+
 // ── take a DOM snapshot with Playwright ─────────────────────────────────────
-async function snapshot(page, url) {
+async function snapshot(page, url, { steps = [], credentials } = {}) {
   await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
+
+  if (steps.length > 0) {
+    await executeSteps(page, steps, credentials);
+  }
+
   await page.waitForTimeout(500);
-  const title          = await page.title();
-  const finalUrl       = page.url();
+  const title             = await page.title();
+  const finalUrl          = page.url();
   const accessibilityTree = await page.locator("body").ariaSnapshot();
   const suggestedLocators = extractLocators(accessibilityTree);
   return { title, finalUrl, accessibilityTree, suggestedLocators };
@@ -174,11 +234,18 @@ Generate the complete spec file now:`;
 }
 
 // ── parse .md ─────────────────────────────────────────────────────────────────
+// Recognised fields inside a ## section:
+//   testId:      optional — auto-generated if missing
+//   url:         required
+//   description: optional
+//   credentials: optional — maps to <PREFIX>_USERNAME / <PREFIX>_PASSWORD in .env
+//   steps:       optional multi-line block — each '  - step' line is one step
 function parseMd(filePath) {
   const lines   = fs.readFileSync(filePath, "utf8").split(/\r?\n/);
   const cases   = [];
   let cur       = null;
   let autoIdx   = 1;
+  let inSteps   = false;
 
   const flush = () => {
     if (cur?.url) {
@@ -193,15 +260,24 @@ function parseMd(filePath) {
     const urlLine    = line.match(/^url:\s+(.+)/);
     const descLine   = line.match(/^description:\s+(.+)/);
     const credLine   = line.match(/^credentials:\s+(.+)/);
+    const stepsLine  = line.match(/^steps:\s*$/);
+    const stepItem   = line.match(/^\s+-\s+(.+)/);
 
     if (heading) {
       flush();
-      cur = { name: heading[1].trim(), testId: "", url: "", description: "", credentialsPrefix: "" };
+      cur = { name: heading[1].trim(), testId: "", url: "", description: "", credentialsPrefix: "", steps: [] };
+      inSteps = false;
     } else if (cur) {
-      if (testIdLine) cur.testId            = testIdLine[1].trim();
-      if (urlLine)    cur.url               = urlLine[1].trim();
-      if (descLine)   cur.description       = descLine[1].trim();
-      if (credLine)   cur.credentialsPrefix = credLine[1].trim();
+      if (inSteps) {
+        if (stepItem) cur.steps.push(stepItem[1].trim());
+        // blank lines inside steps block are silently skipped
+      } else {
+        if (stepsLine)       inSteps = true;
+        else if (testIdLine) cur.testId            = testIdLine[1].trim();
+        else if (urlLine)    cur.url               = urlLine[1].trim();
+        else if (descLine)   cur.description       = descLine[1].trim();
+        else if (credLine)   cur.credentialsPrefix = credLine[1].trim();
+      }
     }
   }
   flush();
@@ -233,17 +309,26 @@ async function main() {
   let passed = 0, failed = 0;
 
   for (let i = 0; i < cases.length; i++) {
-    const { testId, name, url, description, credentialsPrefix } = cases[i];
+    const { testId, name, url, description, credentialsPrefix, steps } = cases[i];
     console.log(`  [${i + 1}/${cases.length}] ${testId} — ${name}`);
     console.log(`         ${description || ""}`);
+    if (steps.length > 0) console.log(`         Steps: ${steps.join(" → ")}`);
+
+    // Resolve form credentials from env (used by 'login' step)
+    let credentials;
+    if (credentialsPrefix) {
+      const username = process.env[`${credentialsPrefix}_USERNAME`];
+      const password = process.env[`${credentialsPrefix}_PASSWORD`];
+      if (username && password) credentials = { username, password };
+    }
 
     const context = await browser.newContext();
     const page    = await context.newPage();
 
     try {
-      // 1. Snapshot
+      // 1. Snapshot (with optional flow steps)
       process.stdout.write(`         Snapshot …`);
-      const snap     = await snapshot(page, url);
+      const snap     = await snapshot(page, url, { steps, credentials });
       const snapFile = path.join(SNAP_OUT, `${testId}.json`);
       fs.writeFileSync(snapFile, JSON.stringify({ ...snap, testCase: { testId, name, description } }, null, 2));
       process.stdout.write(` ✓   Generate spec …`);

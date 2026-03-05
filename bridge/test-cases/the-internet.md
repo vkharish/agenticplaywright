@@ -16,3 +16,11 @@ description: Single dropdown selector with two options
 testId: QA-INTERNET-05-GEN
 url: https://the-internet.herokuapp.com/checkboxes
 description: Two checkboxes, one checked by default
+
+## Secure Area
+testId: QA-INTERNET-06-GEN
+url: https://the-internet.herokuapp.com/login
+credentials: THE_INTERNET
+description: Secure area — only accessible after login
+steps:
+  - login
