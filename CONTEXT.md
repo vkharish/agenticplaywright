@@ -20,7 +20,14 @@ No mocks. No hardcoded selectors. Tests are generated from the live DOM every ti
 ## Repository
 
 `git@github.com:vkharish/agenticplaywright.git`
-Cloned to `~/anthropic` on the Linux box.
+
+**Primary machine: Windows laptop** (office)
+- Node.js already installed (corporate)
+- Git already installed (corporate GitLab setup)
+- Cloned to `%USERPROFILE%\anthropic` (i.e. `C:\Users\YourName\anthropic`)
+
+**Secondary: Linux box** (optional, for server-side runs or Jenkins)
+- Cloned to `~/anthropic`
 
 ---
 
@@ -32,8 +39,8 @@ Cloned to `~/anthropic` on the Linux box.
 | Spec generator (standalone) | `generate.js` — Node.js + Playwright + Anthropic SDK |
 | Spec generator (via HTTP) | `bridge/` — Express microservice |
 | AI | Claude API (`claude-opus-4-6` default, `claude-sonnet-4-6` optional) |
-| Orchestration | n8n (corporate instance, connected later) |
-| Process manager | pm2 (Linux) |
+| Orchestration | n8n (corporate instance, separate Linux box) |
+| CI | Jenkins (corporate) |
 | Credentials | `.env` files — never committed |
 
 ---
@@ -41,20 +48,23 @@ Cloned to `~/anthropic` on the Linux box.
 ## Architecture
 
 ```
-Linux box
-├── bridge/          Express HTTP microservice (port 3000)
-│   └── pm2 process: "bridge"
-├── n8n              Workflow automation (port 5678) — corporate instance
-│   └── pm2 process: "n8n"  OR  corporate hosted n8n
-└── report server    npx serve playwright-report (port 9323)
-    └── pm2 process: "report"
+Windows laptop (primary)
+├── bridge/          Express HTTP microservice (port 3000) — PowerShell window
+├── Playwright       Runs tests directly on Windows — no Docker, no Linux needed
+├── generate.js      Generates specs — runs directly in PowerShell
+└── Browser          Accesses n8n UI, Jira, Jenkins, app under test directly
 
-Windows laptop
-└── SSH tunnel → browser only
-    ssh -L 3000:localhost:3000 -L 5678:localhost:5678 -L 9323:localhost:9323 user@linux-box
+Corporate network (already accessible from Windows)
+├── n8n              Corporate hosted instance — reachable from Windows browser
+├── Jira/Zephyr      Test case management
+└── Jenkins          CI pipeline
+
+Linux box (optional — for server-side or headless CI runs)
+└── Same repo, same setup — use setup-linux.sh
 ```
 
-**No Docker needed on Linux.** Docker was only used during early Mac development.
+**No Docker needed on Windows.** No SSH tunnels needed — everything is reachable directly.
+**No admin rights needed on Windows** — Node.js and Git are already installed corporately.
 
 ---
 
@@ -358,27 +368,38 @@ File written to tests/zephyr/{testId}.spec.ts on Linux box
 
 ## Current state (as of last session)
 
-### Working end-to-end ✅
+### Working end-to-end ✅ (tested on Mac)
 - `generate.js` — tested on the-internet.herokuapp.com, generates specs, runs 4/4 tests
 - `bridge/run-from-md.js --snapshot-only` — tested, 3/3 snapshots pass
 - All 4 existing specs pass: QA-INTERNET-01, 02, 03, 04
-- `setup-linux.sh` — written, pushed, not yet tested on actual Linux box
 - Bridge endpoints: /health, /snapshot, /heal, /generate-spec, /write-spec — all implemented
 
-### Not yet tested ⚠️
-- `generate.js` and `bridge/run-from-md.js` (full, with Claude) on office Linux box
-- `setup-linux.sh` on a real Linux box
-- Corporate n8n integration
+### Not yet tested ⚠️ (pending office Windows run)
+- `setup-windows.ps1` on the actual office Windows laptop
+- `generate.js` with real `ANTHROPIC_API_KEY` on Windows
+- `bridge/run-from-md.js` full pipeline on Windows
 - `/write-spec` endpoint
 - `scripts/heal-on-failure.js` + `Jenkinsfile` in real Jenkins pipeline
+- Corporate n8n integration
 
-### Next steps on office Linux box
-1. Run `setup-linux.sh`
-2. Test `generate.js bridge/test-cases/the-internet.md` — verify full pipeline
-3. Test `bridge/run-from-md.js bridge/test-cases/the-internet.md` — verify bridge flow
-4. Add office app to `bridge/test-cases/my-app.md`, run against real app
-5. Connect Jenkins — add `Jenkinsfile` to Jenkins job, add secrets
-6. Connect corporate n8n — build Option C workflow
+### Next steps on office Windows laptop
+1. Open PowerShell → `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`
+2. Clone repo: `git clone git@github.com:vkharish/agenticplaywright.git $env:USERPROFILE\anthropic`
+3. Run: `cd $env:USERPROFILE\anthropic && .\setup-windows.ps1`
+4. Enter `ANTHROPIC_API_KEY` when prompted
+5. Test standalone: `node generate.js bridge/test-cases/the-internet.md`
+6. Run tests: `npx playwright test --project=public-chromium`
+7. Add office app to `bridge/test-cases/my-app.md`, run against real app
+8. Wire up Jenkins — point job to `Jenkinsfile` in repo, add `BRIDGE_API_KEY` and `APP_BASE_URL` credentials
+9. Wire up corporate n8n — build Option C workflow (snapshot → LLM node → write-spec)
+
+### Windows-specific notes for Claude
+- Use `%USERPROFILE%\anthropic` or `$env:USERPROFILE\anthropic` for repo path
+- `npx playwright install chromium` — no `--with-deps` flag on Windows
+- Bridge runs in a PowerShell window with `npm start` — no pm2 needed on Windows
+- No `pm2 startup` on Windows — just start manually or use Windows Task Scheduler
+- Both `/` and `\` work in Node.js paths on Windows
+- `.sh` scripts don't run on Windows — always use the `.js` equivalents (`run-from-md.js` not `run-from-md.sh`)
 
 ---
 
@@ -457,8 +478,15 @@ QA reviews the suggestions, updates the spec file, and re-runs.
 
 ## Common commands
 
-```bash
+### Windows (PowerShell) — primary
+
+```powershell
+# Start bridge (keep this window open)
+cd $env:USERPROFILE\anthropic\bridge
+npm start
+
 # Generate specs — standalone (no bridge)
+cd $env:USERPROFILE\anthropic
 node generate.js bridge/test-cases/the-internet.md
 
 # Generate specs — via bridge
@@ -475,29 +503,34 @@ npx playwright test tests/zephyr/QA-MYAPP-01.spec.ts  # single spec
 # View report
 npx playwright show-report
 
-# Bridge
+# Pull latest and rebuild bridge
+git pull
+cd bridge && npm run build && cd ..
+# restart bridge: close the bridge window and reopen it with npm start
+
+# Auto-heal after failed run
+node scripts/heal-on-failure.js
+
+# Bridge health check
+Invoke-RestMethod http://localhost:3000/health
+```
+
+### Linux (bash) — secondary
+
+```bash
+# Bridge via pm2
 pm2 start npm --name bridge -- start --prefix ~/anthropic/bridge
 pm2 logs bridge
 pm2 restart bridge
 curl http://localhost:3000/health
 
-# Pull latest and rebuild bridge
-git pull
-cd bridge && npm run build && pm2 restart bridge
+# Generate + test
+node generate.js bridge/test-cases/the-internet.md
+npx playwright test --project=public-chromium
+npx playwright show-report
 
-# Manually trigger auto-heal (after a failed test run)
-node scripts/heal-on-failure.js
-
-# Manually call /heal for a single broken locator
-curl -X POST http://localhost:3000/heal \
-  -H "x-api-key: dev-key" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "url": "https://myapp.com/login",
-    "brokenLocator": "page.getByRole(\"button\", { name: \"Sign in\" })",
-    "errorMessage": "resolved to 0 elements",
-    "context": "login submit button"
-  }'
+# Pull latest
+git pull && cd bridge && npm run build && pm2 restart bridge
 ```
 
 ---
