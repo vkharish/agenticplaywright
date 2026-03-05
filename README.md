@@ -13,6 +13,137 @@ AI-driven test generation and self-healing for Playwright — powered by Claude 
 
 ---
 
+## How it works end-to-end
+
+There are three independent phases. Each has its own trigger, manual effort, and AI involvement.
+
+---
+
+### Phase 1 — Writing tests (spec generation)
+
+Runs **once per new test case**. Three ways to trigger it:
+
+#### Option A — Standalone (QA runs one command)
+
+```
+QA adds entry to .md file  →  node generate.js bridge/test-cases/my-app.md
+        ↓
+Playwright navigates to URL, executes steps (login, click…), takes DOM snapshot
+        ↓                                                No AI — pure Playwright
+Claude API call  ◄── ONLY AI STEP (~$0.01–0.05, ~10s)
+        ↓
+.spec.ts written to tests/zephyr/
+```
+
+**Manual effort:** Write the `.md` entry (2 min) + run one command.
+**Skips automatically** if `.spec.ts` already exists — safe to re-run.
+
+#### Option B — Via bridge (same as A, Playwright runs inside bridge service)
+
+```
+node bridge/run-from-md.js bridge/test-cases/my-app.md
+```
+Same flow — use when bridge is already running for n8n.
+
+#### Option C — Corporate n8n (no API key on bridge machine)
+
+```
+POST /webhook/bridge-generate-llm  { testId, url, steps, credentialsPrefix }
+        ↓
+bridge /snapshot   — Playwright navigates, resolves credentials from bridge .env
+        ↓                              raw passwords never sent to n8n
+bridge /build-prompt  — formats the Claude prompt  (no API key, no AI)
+        ↓
+n8n LLM Node  ◄── ONLY AI STEP — corporate key managed by IT, QA never sees it
+        ↓
+bridge /write-spec  — writes .spec.ts to disk
+```
+
+**Manual effort:** Send the webhook payload (or let Zephyr send it automatically in Phase 4).
+**No API key setup for QA** — IT configures the n8n credential once.
+
+---
+
+### Phase 2 — Running tests (CI)
+
+**Zero AI. Zero manual effort. Runs on every Jenkins build.**
+
+```
+Jenkins triggers automatically
+        ↓
+npx playwright test --project=chromium
+        ↓
+Playwright executes every .spec.ts against the live app
+— no Claude, no network calls outside the app under test
+        ↓
+Results → playwright-report/index.html + test-results/junit.xml
+```
+
+**Cost per CI run: $0.**
+
+---
+
+### Phase 3 — Auto-heal (when a test breaks in CI)
+
+**Triggered automatically by Jenkins on failure. QA only reviews the suggestion.**
+
+```
+Test fails — e.g. button renamed from "Sign in" to "Log in"
+        ↓
+Jenkins runs node scripts/heal-on-failure.js automatically
+        ↓
+Reads junit.xml → extracts broken locator via regex  (no AI)
+        ↓
+bridge /heal  ◄── ONLY AI STEP (~$0.01 per broken test)
+— takes fresh DOM snapshot, Claude suggests corrected locator
+        ↓
+Fix printed in Jenkins log + saved as downloadable artifact
+        ↓
+QA reads suggestion, updates one line in spec, re-runs  (2 min)
+```
+
+**Manual effort:** Review + apply the fix (2 min). Everything else is automatic.
+
+---
+
+### AI involvement summary
+
+| Phase | Trigger | Manual effort | AI calls | Cost |
+|-------|---------|:---:|:---:|------|
+| Write spec (Option A/B) | QA runs command | Write `.md` entry | 1 per new test | ~$0.01–0.05 |
+| Write spec (Option C) | POST to n8n webhook | Send webhook payload | 1 per new test | Corporate key |
+| Run tests in CI | Jenkins automatic | None | 0 | $0 |
+| Auto-heal broken test | Jenkins automatic | Review + apply fix | 1 per broken test | ~$0.01 |
+
+**AI is used exactly twice per test case over its entire lifetime** — once to write it, once if it ever breaks.
+
+---
+
+### What QA does day-to-day
+
+```
+New feature shipped
+        ↓
+QA adds to my-app.md:
+  ## New Report Page
+  testId: QA-MYAPP-10
+  url: https://myapp.com/login
+  credentials: MY_APP
+  steps:
+    - login
+    - click: Reports
+        ↓
+Run: node generate.js bridge/test-cases/my-app.md
+(or trigger n8n webhook for Option C)
+        ↓
+Spec generated → QA reads it → commits → Jenkins picks it up
+        ↓
+If a locator breaks next sprint:
+  Jenkins auto-heals → QA reviews suggestion → updates one line → done
+```
+
+---
+
 ## Architecture
 
 ```
