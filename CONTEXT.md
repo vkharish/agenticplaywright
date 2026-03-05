@@ -148,7 +148,8 @@ Use when: corporate n8n has Claude access built in and API key is not user-acces
     │   ├── middleware/
     │   │   └── apiKey.ts        ← x-api-key header check against BRIDGE_API_KEY env var
     │   └── utils/
-    │       └── aria.ts          ← extractLocatorsFromSnapshot(ariaYaml) → LocatorSuggestion[]
+    │       ├── aria.ts          ← extractLocatorsFromSnapshot(ariaYaml) → LocatorSuggestion[]
+    │       └── steps.ts         ← executeSteps(page, steps, credentials) — Approach 3 navigator
     ├── test-cases/
     │   ├── the-internet.md      ← Test cases for https://the-internet.herokuapp.com
     │   └── my-app.md            ← Template for your own app — edit this
@@ -232,18 +233,46 @@ Never hardcode credentials. Never use `process.env.THE_INTERNET_USERNAME` direct
 ```markdown
 # App Name
 
-## Page Name
+## Simple Page (no login required)
 testId: QA-MYAPP-01
 url: https://myapp.com/login
 credentials: MY_APP
 description: What this page does and what to test
+
+## Page Behind Login (Approach 3 — flow steps)
+testId: QA-MYAPP-02
+url: https://myapp.com/login
+credentials: MY_APP
+description: Dashboard — post-login landing page
+steps:
+  - login
+  - click: Reports
+  - click: Monthly Summary
 ```
 
 Fields:
 - `testId` — if omitted, auto-generates `QA-AUTO-01`
-- `url` — required
+- `url` — required. For multi-step flows, set this to the START URL (e.g. login page)
 - `credentials` — optional. Prefix maps to `<PREFIX>_USERNAME` / `<PREFIX>_PASSWORD` in `.env`
 - `description` — optional context passed to Claude
+- `steps` — optional multi-line block. Each `  - step` is executed in order BEFORE the snapshot is taken
+
+### Supported step types
+
+| Step | Example | What it does |
+|------|---------|-------------|
+| `login` | `- login` | Fills username + password from credentials, clicks submit |
+| `click: <text>` | `- click: Reports` | Clicks button/link/tab/menuitem matching the text |
+| `navigate: <url>` | `- navigate: https://myapp.com/reports` | Hard-navigates to a URL |
+| `fill: <label> \| <value>` | `- fill: Search \| invoice 1234` | Fills an input by its label |
+| `wait` | `- wait` | Waits for network idle |
+| `wait: <ms>` | `- wait: 2000` | Waits N milliseconds |
+
+**How credentials flow to steps:**
+- `run-from-md.js` resolves `credentials: MY_APP` → reads `MY_APP_USERNAME` / `MY_APP_PASSWORD` from root `.env` → passes `{ username, password }` in the HTTP body to `bridge /snapshot`
+- `generate.js` resolves the same from root `.env` and passes directly to `executeSteps()`
+- The bridge's `executeSteps()` (`bridge/src/utils/steps.ts`) uses these to fill the login form
+- Credentials are **never** stored in the snapshot or spec — only used during navigation
 
 ---
 
@@ -253,18 +282,25 @@ All endpoints except `/health` require header: `x-api-key: <BRIDGE_API_KEY>`
 
 ### POST /snapshot
 ```json
-Request:  { "url": "https://myapp.com/login" }
+Request: {
+  "url": "https://myapp.com/login",
+  "steps": ["login", "click: Reports"],        // optional — Approach 3 flow steps
+  "credentials": { "username": "u", "password": "p" },  // optional — for 'login' step
+  "auth": { "username": "u", "password": "p" }           // optional — HTTP Basic Auth only
+}
 Response: {
   "success": true,
   "title": "Page Title",
-  "finalUrl": "https://myapp.com/login",
-  "accessibilityTree": "- textbox \"Username\"\n- button \"Login\"...",
+  "finalUrl": "https://myapp.com/reports",     // reflects final URL after steps
+  "accessibilityTree": "- heading \"Reports\"...",
   "suggestedLocators": [
     { "element": "Textbox \"Username\"", "locator": "page.getByRole('textbox', { name: /Username/i })", "priority": 1 }
   ],
   "timestamp": "2026-03-03T..."
 }
 ```
+
+**Important:** `auth` is for HTTP Basic Auth (browser prompt). `credentials` is for form-based login used by the `login` step. These are separate fields.
 
 ### POST /heal
 ```json
@@ -370,15 +406,27 @@ File written to tests/zephyr/{testId}.spec.ts on Linux box
 
 ### Working end-to-end ✅ (tested on Mac)
 - `generate.js` — tested on the-internet.herokuapp.com, generates specs, runs 4/4 tests
-- `bridge/run-from-md.js --snapshot-only` — tested, 3/3 snapshots pass
-- All 4 existing specs pass: QA-INTERNET-01, 02, 03, 04
-- Bridge endpoints: /health, /snapshot, /heal, /generate-spec, /write-spec — all implemented
+- `bridge/run-from-md.js --snapshot-only` — tested, 4/4 snapshots pass (includes Secure Area with login step)
+- **Approach 3 (flow steps) — confirmed working:** Secure Area test navigates through login, snapshots post-login page at `/secure`
+- All 4 hand-authored specs pass: QA-INTERNET-01, 02, 03, 04
+- Bridge endpoints: /health, /snapshot (with steps), /heal, /generate-spec, /write-spec — all implemented
 
-### Not yet tested ⚠️ (pending office Windows run)
+### Approach 3 implementation — what was built
+Multi-page navigation is solved by adding a `steps:` block to the `.md` file. **Do NOT implement Approach 2 (authenticated snapshot / pre-auth cookies).** Approach 3 is already implemented and tested.
+
+Key files added/changed:
+- **`bridge/src/utils/steps.ts`** — new. `executeSteps(page, steps, credentials)` — the step runner
+- **`bridge/src/routes/snapshot.ts`** — updated. Now accepts `steps[]` + `credentials` in request body
+- **`generate.js`** — updated. Parses `steps:` block from `.md`, executes steps inline before snapshot
+- **`bridge/run-from-md.js`** — updated. Parses `steps:` block, resolves credentials from root `.env`, sends both to bridge `/snapshot`
+- **`bridge/test-cases/the-internet.md`** — updated. Added `QA-INTERNET-06-GEN` Secure Area with `steps: - login`
+- **`bridge/test-cases/my-app.md`** — updated. Added QA-MYAPP-02 through 05 with multi-step navigation examples
+
+### Pending ⚠️ (requires ANTHROPIC_API_KEY — test on office Windows laptop)
+- Generate spec for `QA-INTERNET-06-GEN` (Secure Area) — snapshot verified ✅, spec generation pending
 - `setup-windows.ps1` on the actual office Windows laptop
-- `generate.js` with real `ANTHROPIC_API_KEY` on Windows
+- `generate.js` full pipeline (snapshot + Claude API) on Windows
 - `bridge/run-from-md.js` full pipeline on Windows
-- `/write-spec` endpoint
 - `scripts/heal-on-failure.js` + `Jenkinsfile` in real Jenkins pipeline
 - Corporate n8n integration
 
@@ -388,8 +436,9 @@ File written to tests/zephyr/{testId}.spec.ts on Linux box
 3. Run: `cd $env:USERPROFILE\anthropic && .\setup-windows.ps1`
 4. Enter `ANTHROPIC_API_KEY` when prompted
 5. Test standalone: `node generate.js bridge/test-cases/the-internet.md`
+   - This generates ALL 4 test cases including QA-INTERNET-06-GEN (Secure Area with login step)
 6. Run tests: `npx playwright test --project=public-chromium`
-7. Add office app to `bridge/test-cases/my-app.md`, run against real app
+7. Add office app to `bridge/test-cases/my-app.md`, fill in real URLs + steps
 8. Wire up Jenkins — point job to `Jenkinsfile` in repo, add `BRIDGE_API_KEY` and `APP_BASE_URL` credentials
 9. Wire up corporate n8n — build Option C workflow (snapshot → LLM node → write-spec)
 
