@@ -21,7 +21,12 @@ export interface GenerateSpecParams {
   suggestedLocators: Array<{ element: string; locator: string; priority: number }>;
 }
 
-export async function generateSpec(params: GenerateSpecParams): Promise<string> {
+/**
+ * Build the prompt sent to Claude for spec generation.
+ * Exported separately so /build-prompt can return it to n8n's LLM node
+ * without making the Claude API call itself.
+ */
+export function buildPrompt(params: GenerateSpecParams): string {
   const { testId, suiteName, description, url, credentialsPrefix, accessibilityTree, suggestedLocators } = params;
 
   const locatorLines = suggestedLocators
@@ -47,7 +52,7 @@ Use the \`username\` and \`password\` variables in the test steps — never past
 ## Credentials
 This page does not require login credentials. Do not import or reference any credential utilities.`;
 
-  const prompt = `You are a Playwright test automation engineer. Generate a complete .spec.ts file.
+  return `You are a Playwright test automation engineer. Generate a complete .spec.ts file.
 
 ## Project conventions (follow exactly)
 
@@ -92,6 +97,10 @@ ${accessibilityTree}
 ${locatorLines}
 
 Generate the complete spec file now:`;
+}
+
+export async function generateSpec(params: GenerateSpecParams): Promise<string> {
+  const prompt = buildPrompt(params);
 
   const model = process.env.CLAUDE_MODEL ?? "claude-opus-4-6";
   const response = await client().messages.create({

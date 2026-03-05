@@ -16,10 +16,14 @@ const SnapshotSchema = z.object({
   auth: z
     .object({ username: z.string(), password: z.string() })
     .optional(),
-  // Form-based credentials used by the 'login' step
+  // Form-based credentials used by the 'login' step (passed directly)
   credentials: z
     .object({ username: z.string(), password: z.string() })
     .optional(),
+  // Credentials prefix — bridge resolves <PREFIX>_USERNAME / <PREFIX>_PASSWORD
+  // from its own .env. Used by Option C (corporate n8n) so n8n never handles
+  // raw passwords.
+  credentialsPrefix: z.string().optional(),
   // Navigation steps to execute before snapshotting (Approach 3)
   steps: z.array(z.string()).optional(),
 });
@@ -31,14 +35,23 @@ router.post("/snapshot", requireApiKey, async (req: Request, res: Response) => {
     return;
   }
 
-  const { url, waitFor, auth, steps, credentials } = parsed.data;
+  const { url, waitFor, auth, steps, credentials, credentialsPrefix } = parsed.data;
+
+  // Resolve credentials: explicit object takes priority, then prefix → env lookup
+  let effectiveCredentials = credentials;
+  if (!effectiveCredentials && credentialsPrefix) {
+    const username = process.env[`${credentialsPrefix}_USERNAME`];
+    const password = process.env[`${credentialsPrefix}_PASSWORD`];
+    if (username && password) effectiveCredentials = { username, password };
+  }
+
   const session = await newSession(auth);
 
   try {
     await session.page.goto(url, { waitUntil: waitFor });
 
     if (steps && steps.length > 0) {
-      await executeSteps(session.page, steps, credentials);
+      await executeSteps(session.page, steps, effectiveCredentials);
     }
 
     await session.page.waitForTimeout(500); // let page settle after navigation/steps
