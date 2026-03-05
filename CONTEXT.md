@@ -107,11 +107,49 @@ Also supports snapshot-only mode (no Claude API needed):
 node bridge/run-from-md.js bridge/test-cases/the-internet.md --snapshot-only
 ```
 
-### Option C — Corporate n8n LLM node (no API key on Linux box)
+### Option C — Corporate n8n LLM node (no API key needed on bridge machine)
 
-n8n workflow: `bridge /snapshot` → LLM Node (corporate Claude) → `bridge /write-spec`
+```
+Webhook → bridge/snapshot → bridge/build-prompt → n8n LLM Node → bridge/write-spec
+```
 
-Use when: corporate n8n has Claude access built in and API key is not user-accessible.
+Use when: corporate n8n already has Claude/OpenAI access via its own managed credential.
+**ANTHROPIC_API_KEY is NOT needed in bridge/.env for this option.**
+
+**How it works:**
+1. n8n webhook receives `{ testId, url, suiteName, description, credentialsPrefix, steps }`
+2. Calls `bridge /snapshot` — Playwright navigates, executes steps, returns accessibility tree.
+   `credentialsPrefix` is sent (e.g. `"MY_APP"`); bridge resolves `MY_APP_USERNAME/PASSWORD`
+   from its own `.env` — raw passwords never pass through n8n.
+3. Calls `bridge /build-prompt` — returns the fully formatted Claude prompt as a string.
+   No Claude call, no API key needed on the bridge.
+4. n8n LLM Node (Claude Sonnet — corporate credential) receives the prompt → generates spec.
+5. Calls `bridge /write-spec` — writes the file to `tests/zephyr/` on the bridge machine.
+
+**n8n workflow file:** `bridge/n8n/corporate-llm-workflow.json` — imported by `setup.sh`
+
+**After import, one manual step in n8n UI:**
+Open `Bridge — Generate Spec via Corporate LLM` → click the `Claude Sonnet` sub-node →
+select your existing Anthropic credential.
+
+**n8n environment variables required:**
+```
+BRIDGE_URL=http://localhost:3000        # or http://<bridge-machine-ip>:3000
+BRIDGE_API_KEY=dev-key                  # same value as bridge/.env BRIDGE_API_KEY
+```
+
+**Trigger the workflow** (POST to n8n webhook):
+```json
+POST http://<n8n-host>:5678/webhook/bridge-generate-llm
+{
+  "testId":            "QA-MYAPP-01",
+  "url":               "https://myapp.com/login",
+  "suiteName":         "Login Page",
+  "description":       "Main login form",
+  "credentialsPrefix": "MY_APP",
+  "steps":             ["login"]
+}
+```
 
 ---
 
@@ -152,7 +190,8 @@ Use when: corporate n8n has Claude access built in and API key is not user-acces
     │   │   ├── snapshot.ts      ← POST /snapshot → { accessibilityTree, suggestedLocators, ... }
     │   │   ├── heal.ts          ← POST /heal → { suggestedFix, explanation, confidence }
     │   │   ├── generate.ts      ← POST /generate-spec → { spec } (needs ANTHROPIC_API_KEY)
-    │   │   └── writeSpec.ts     ← POST /write-spec → writes testId.spec.ts to tests/zephyr/
+    │   │   ├── writeSpec.ts     ← POST /write-spec → writes testId.spec.ts to tests/zephyr/
+    │   │   └── buildPrompt.ts   ← POST /build-prompt → { prompt } (no API key — for Option C)
     │   ├── services/
     │   │   ├── browser.ts       ← Playwright singleton. getBrowser(), newSession(), closeSession()
     │   │   └── claude.ts        ← Anthropic SDK. generateSpec(params) → spec string
@@ -166,11 +205,12 @@ Use when: corporate n8n has Claude access built in and API key is not user-acces
     │   └── my-app.md            ← Template for your own app — edit this
     ├── snapshots/               ← Saved DOM snapshots (gitignored)
     ├── n8n/
-    │   ├── snapshot-workflow.json      ← n8n: Webhook → /snapshot → respond
-    │   ├── heal-workflow.json          ← n8n: Webhook → /heal → respond
-    │   ├── generate-specs-workflow.json← n8n: Manual → executeCommand(run-from-md.js)
-    │   ├── run-tests-workflow.json     ← n8n: Manual → executeCommand(playwright test)
-    │   └── setup.sh                    ← Imports all 4 workflows via n8n public API v1
+    │   ├── snapshot-workflow.json          ← n8n: Webhook → /snapshot → respond
+    │   ├── heal-workflow.json              ← n8n: Webhook → /heal → respond
+    │   ├── generate-specs-workflow.json    ← n8n: Manual → executeCommand(run-from-md.js)
+    │   ├── run-tests-workflow.json         ← n8n: Manual → executeCommand(playwright test)
+    │   ├── corporate-llm-workflow.json     ← n8n: Option C — /snapshot → /build-prompt → LLM → /write-spec
+    │   └── setup.sh                        ← Imports all 5 workflows via n8n public API v1
     ├── run-from-md.js           ← Cross-platform. Calls bridge HTTP API. Supports --snapshot-only
     ├── run-from-md.sh           ← Bash version
     ├── package.json             ← Bridge deps: express, playwright, zod, @anthropic-ai/sdk, dotenv
@@ -349,6 +389,22 @@ Request:  { "testId": "QA-MYAPP-01", "spec": "import { test... }" }
 Response: { "success": true, "testId": "QA-MYAPP-01", "filePath": "...tests/zephyr/QA-MYAPP-01.spec.ts" }
 ```
 
+### POST /build-prompt
+Builds the Claude prompt from snapshot output + test metadata. Returns the prompt string.
+No Claude call. No ANTHROPIC_API_KEY needed. Used exclusively by Option C n8n workflow.
+```json
+Request: {
+  "testId": "QA-MYAPP-01",
+  "suiteName": "Login Page",
+  "description": "Main login form",
+  "credentialsPrefix": "MY_APP",
+  "url": "https://myapp.com/login",
+  "accessibilityTree": "...",
+  "suggestedLocators": [...]
+}
+Response: { "success": true, "prompt": "<full prompt string ready for LLM node>" }
+```
+
 ---
 
 ## Spec conventions (Claude must follow these when generating)
@@ -400,16 +456,20 @@ Use `contentType: "raw"` + `rawContentType: "application/json"` for JSON bodies.
 
 **`active` field is read-only** — remove it from workflow JSON before POST to API.
 
-**Workflow for corporate n8n (Option C):**
+**Workflow for corporate n8n (Option C) — already built:**
 ```
-HTTP Request → POST bridge/snapshot
-  ↓ accessibilityTree + suggestedLocators
-LLM Node (Claude) → generate spec using the prompt from bridge/src/services/claude.ts
-  ↓ spec text
-HTTP Request → POST bridge/write-spec { testId, spec }
+POST /webhook/bridge-generate-llm
   ↓
-File written to tests/zephyr/{testId}.spec.ts on Linux box
+bridge /snapshot  (Playwright → DOM + locators; resolves credentials from bridge .env)
+  ↓
+bridge /build-prompt  (formats the Claude prompt — no API key, no Claude call)
+  ↓
+n8n LLM Node  (corporate Claude Sonnet → generates .spec.ts)
+  ↓
+bridge /write-spec  (writes file to tests/zephyr/ on bridge machine)
 ```
+Workflow JSON: `bridge/n8n/corporate-llm-workflow.json`
+New bridge endpoint: `POST /build-prompt` — see `bridge/src/routes/buildPrompt.ts`
 
 ---
 
@@ -451,7 +511,13 @@ Key files added/changed:
 6. Run tests: `npx playwright test --project=public-chromium`
 7. Add office app to `bridge/test-cases/my-app.md`, fill in real URLs + steps
 8. Wire up Jenkins — point job to `Jenkinsfile` in repo, add `BRIDGE_API_KEY` and `APP_BASE_URL` credentials
-9. Wire up corporate n8n — build Option C workflow (snapshot → LLM node → write-spec)
+9. Wire up corporate n8n (Option C — already built):
+   - Import workflow: `N8N_API_KEY=<key> N8N_URL=http://<n8n-host>:5678 bash bridge/n8n/setup.sh`
+   - Open `Bridge — Generate Spec via Corporate LLM` in n8n UI
+   - Click `Claude Sonnet` sub-node → select your Anthropic credential
+   - Set n8n env vars: `BRIDGE_URL`, `BRIDGE_API_KEY`
+   - Ensure app credentials (MY_APP_USERNAME etc.) are in `~/anthropic/.env` on the bridge machine
+   - Trigger: POST `http://<n8n>:5678/webhook/bridge-generate-llm` with testId, url, suiteName, credentialsPrefix, steps
 
 ### Windows-specific notes for Claude
 - Use `%USERPROFILE%\anthropic` or `$env:USERPROFILE\anthropic` for repo path
