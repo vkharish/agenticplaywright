@@ -82,8 +82,26 @@ For a team maintaining **100 test cases** with monthly UI changes:
 |-------|-----------------|--------|
 | **Phase 1** | Full framework running on Windows — generate tests, run, view report | ✅ Done |
 | **Phase 2** | Jenkins CI — run tests automatically, auto-heal broken locators on failure | ✅ Done |
-| **Phase 3** | Connect corporate n8n — trigger generation from Windows browser, no terminal needed | 🔄 In progress |
+| **Phase 3** | Connect corporate n8n — trigger generation from Windows browser, no terminal needed | ✅ Done |
 | **Phase 4** | Zephyr webhook → test auto-generated when QA creates a test case in Jira | Planned |
+
+### Phase 3 — Corporate n8n integration — how it works
+
+```
+QA opens n8n in browser → clicks Run on "Generate Spec" workflow
+      ↓
+n8n calls bridge → Playwright navigates to the page, logs in if needed, takes DOM snapshot
+      ↓
+n8n builds the Claude prompt from the snapshot (no API key on the server)
+      ↓
+n8n LLM node calls Claude Sonnet using the CORPORATE API key (managed by IT, not the QA engineer)
+      ↓
+n8n writes the generated .spec.ts file to the test repository
+      ↓
+QA runs tests immediately — no terminal, no API key setup, no file management
+```
+
+**Key point for IT / security:** The QA engineer never sees or manages any API key. The corporate n8n credential is configured once by IT and reused silently. Credentials for the app under test (username/password) live on the bridge server — they never pass through n8n.
 
 ### Jenkins auto-heal — how it works
 
