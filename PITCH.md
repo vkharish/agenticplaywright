@@ -79,7 +79,7 @@ For a team maintaining **100 test cases** with monthly UI changes:
 
 | Phase | What it delivers | Status |
 |-------|-----------------|--------|
-| **Phase 1** | Generate tests from `.md` file, run on Linux, view HTML report from Windows browser | ✅ Done |
+| **Phase 1** | Full framework running on Windows — generate tests, run, view report | ✅ Done |
 | **Phase 2** | Jenkins CI — run tests automatically, auto-heal broken locators on failure | ✅ Done |
 | **Phase 3** | Connect corporate n8n — trigger generation from Windows browser, no terminal needed | 🔄 In progress |
 | **Phase 4** | Zephyr webhook → test auto-generated when QA creates a test case in Jira | Planned |
@@ -114,12 +114,37 @@ QA reviews suggestion, updates one line in the spec, re-runs — done
 
 ---
 
+## Deployment — Zero Infrastructure Overhead
+
+One of the strongest selling points: **this runs entirely on the QA engineer's existing Windows laptop** with no IT involvement.
+
+| Requirement | Detail |
+|-------------|--------|
+| Admin rights on Windows | ❌ Not needed |
+| New server or VM | ❌ Not needed |
+| Docker or containers | ❌ Not needed |
+| VPN or firewall changes | ❌ Not needed — uses existing corporate network |
+| IT ticket to install software | ❌ Not needed — Node.js and Git already installed |
+| Special CI agent setup | ❌ Not needed — runs on any Jenkins agent with Node.js |
+
+**Setup time for a new QA engineer: under 10 minutes**
+```
+1. Open PowerShell
+2. git clone ... && .\setup-windows.ps1
+3. Enter API key when prompted
+4. Done — tests running
+```
+
+Everything the QA engineer already uses daily — n8n, Jira, Jenkins, the app under test — is reachable directly from the same Windows browser. No SSH tunnels, no remote desktops, no context switching.
+
+---
+
 ## Technical Proof Points (for engineering leadership)
 
 - Framework has been tested end-to-end on a public test site — **4/4 tests pass**
-- Jenkins pipeline (`Jenkinsfile`) is ready to plug into your existing Jenkins instance
-- Auto-heal script (`scripts/heal-on-failure.js`) parses Jenkins JUnit results and calls AI — no manual intervention needed
+- Runs entirely on **existing Windows laptops** — no new infrastructure needed
+- Jenkins pipeline (`Jenkinsfile`) ready to plug into your existing Jenkins instance
+- Auto-heal script parses Jenkins JUnit results and calls AI — no manual intervention needed
 - Generated locators use `getByRole()` (WCAG-aligned, refactor-resistant)
-- Runs headless on Linux, report viewable from Windows via SSH tunnel — **no special tooling needed on the Windows laptop**
 - All credentials managed via `.env` — **nothing sensitive in source control**
-- Built on tools the team already knows: Playwright, TypeScript, Node.js, Jenkins
+- Built on tools the team already knows: Playwright, TypeScript, Node.js, Jenkins, GitLab
