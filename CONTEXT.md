@@ -493,13 +493,20 @@ Key files added/changed:
 - **`bridge/test-cases/the-internet.md`** — updated. Added `QA-INTERNET-06-GEN` Secure Area with `steps: - login`
 - **`bridge/test-cases/my-app.md`** — updated. Added QA-MYAPP-02 through 05 with multi-step navigation examples
 
-### Pending ⚠️ (requires ANTHROPIC_API_KEY — test on office Windows laptop)
-- Generate spec for `QA-INTERNET-06-GEN` (Secure Area) — snapshot verified ✅, spec generation pending
+### Built and documented ✅ (ready to use, not yet run on office hardware)
+- **Option C — corporate n8n LLM workflow** — fully implemented and documented in README Day 4
+  - `bridge/n8n/corporate-llm-workflow.json` — importable workflow
+  - `POST /build-prompt` — new bridge endpoint, no API key needed
+  - `credentialsPrefix` on `/snapshot` — bridge resolves credentials from its own `.env`
+  - Setup instructions: README → Day 4 section
+
+### Pending ⚠️ (requires office Windows laptop + ANTHROPIC_API_KEY or corporate n8n)
+- Generate spec for `QA-INTERNET-06-GEN` (Secure Area) — snapshot verified ✅, spec pending
 - `setup-windows.ps1` on the actual office Windows laptop
 - `generate.js` full pipeline (snapshot + Claude API) on Windows
 - `bridge/run-from-md.js` full pipeline on Windows
 - `scripts/heal-on-failure.js` + `Jenkinsfile` in real Jenkins pipeline
-- Corporate n8n integration
+- Corporate n8n Option C — import workflow, link credential, trigger first run
 
 ### Next steps on office Windows laptop
 1. Open PowerShell → `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`
