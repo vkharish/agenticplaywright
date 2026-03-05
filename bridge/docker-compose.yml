@@ -14,8 +14,12 @@ services:
       dockerfile: Dockerfile
     ports:
       - "3000:3000"
+    env_file:
+      - path: .env
+        required: false
     environment:
       - BRIDGE_API_KEY=${BRIDGE_API_KEY:-dev-key}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - PORT=3000
     restart: unless-stopped
     networks:

@@ -19,50 +19,14 @@ $INSTALL_DIR = "$env:USERPROFILE\anthropic"
 function Write-Step { param($msg) Write-Host "`n>> $msg" -ForegroundColor Green }
 function Write-Warn  { param($msg) Write-Host "   $msg" -ForegroundColor Yellow }
 
-# ── 1. Node.js check ──────────────────────────────────────────────────────────
-Write-Step "Checking Node.js..."
-try {
-    $nodeVer = node --version
-    Write-Host "   Node.js $nodeVer found." -ForegroundColor Green
-} catch {
-    Write-Host @"
+# ── 1. Verify Node.js and Git ────────────────────────────────────────────────
+Write-Step "Checking Node.js and Git..."
+$nodeVer = node --version
+$gitVer  = git --version
+Write-Host "   Node.js $nodeVer" -ForegroundColor Green
+Write-Host "   $gitVer" -ForegroundColor Green
 
-Node.js not found. Install the portable ZIP (no admin needed):
-  1. Go to https://nodejs.org/en/download
-  2. Download: Windows Binary (.zip) 64-bit
-  3. Extract to: $env:USERPROFILE\node
-  4. Add to PATH:
-       [System.Environment]::SetEnvironmentVariable(
-         'PATH',
-         [System.Environment]::GetEnvironmentVariable('PATH','User') + ';$env:USERPROFILE\node',
-         'User'
-       )
-  5. Restart PowerShell and re-run this script.
-
-"@ -ForegroundColor Red
-    exit 1
-}
-
-# ── 2. Git check ──────────────────────────────────────────────────────────────
-Write-Step "Checking Git..."
-try {
-    $gitVer = git --version
-    Write-Host "   $gitVer found." -ForegroundColor Green
-} catch {
-    Write-Host @"
-
-Git not found. Install the portable version (no admin needed):
-  1. Go to https://git-scm.com/download/win
-  2. Download: 64-bit Git for Windows Portable
-  3. Extract to: $env:USERPROFILE\git
-  4. Add $env:USERPROFILE\git\bin to PATH (same method as Node.js above)
-  5. Restart PowerShell and re-run this script.
-
-"@ -ForegroundColor Red
-    exit 1
-}
-
-# ── 3. Clone / pull repo ──────────────────────────────────────────────────────
+# ── 2. Clone / pull repo ──────────────────────────────────────────────────────
 Write-Step "Setting up repository at $INSTALL_DIR..."
 if (Test-Path "$INSTALL_DIR\.git") {
     Write-Warn "Repo already cloned — pulling latest..."

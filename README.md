@@ -185,111 +185,92 @@ pm2 startup   # follow the printed instruction once
 
 ---
 
-## Windows setup (no admin rights needed)
+## Windows setup
 
-### What needs to be installed
+Node.js and Git are already installed — no additional installs needed.
 
-| What | Admin needed? | How |
-|------|--------------|-----|
-| Node.js | ❌ No | Portable ZIP from nodejs.org |
-| Git | ❌ No | Portable ZIP from git-scm.com |
-| Playwright Chromium | ❌ No | `npx playwright install chromium` — self-contained |
-| npm packages | ❌ No | Standard `npm install` |
-| Bridge service | ❌ No | Runs in a PowerShell window |
+### What needs admin rights? — Nothing
+
+| What | Admin needed? |
+|------|--------------|
+| npm install | ❌ No |
+| Playwright Chromium | ❌ No — downloads to your user folder |
+| Bridge service | ❌ No — runs in a PowerShell window |
 
 ---
 
-### Automated setup — one script
+### First-time setup
 
-**Step 1 — Install Node.js portable (one time)**
-
-1. Go to https://nodejs.org/en/download
-2. Download **Windows Binary (.zip)** — 64-bit
-3. Extract to `C:\Users\YourName\node`
-4. Open PowerShell and add to PATH permanently:
-```powershell
-[System.Environment]::SetEnvironmentVariable(
-  'PATH',
-  [System.Environment]::GetEnvironmentVariable('PATH','User') + ";$env:USERPROFILE\node",
-  'User'
-)
-```
-5. Restart PowerShell — run `node --version` to verify
-
-**Step 2 — Install Git portable (one time)**
-
-1. Go to https://git-scm.com/download/win
-2. Download **64-bit Git for Windows Portable**
-3. Extract to `C:\Users\YourName\git`
-4. Add to PATH (same method, append `;%USERPROFILE%\git\bin`)
-5. Restart PowerShell — run `git --version` to verify
-
-**Step 3 — Allow PowerShell scripts (one time, no admin)**
+**Step 1 — Allow PowerShell scripts (one time)**
 ```powershell
 Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 ```
 
-**Step 4 — Run setup script**
+**Step 2 — Clone and run setup script**
 ```powershell
 git clone git@github.com:vkharish/agenticplaywright.git $env:USERPROFILE\anthropic
 cd $env:USERPROFILE\anthropic
 .\setup-windows.ps1
 ```
 
-The script will install deps, build bridge, prompt for your API key, and start the bridge in a background window.
+The script installs all deps, builds the bridge, prompts for your `ANTHROPIC_API_KEY`, and starts the bridge in a background window.
 
 ---
 
-### Manual setup (step by step)
+### Manual setup (if you prefer step by step)
 
 ```powershell
-# Clone repo
+# 1. Clone repo
 git clone git@github.com:vkharish/agenticplaywright.git $env:USERPROFILE\anthropic
 cd $env:USERPROFILE\anthropic
 
-# Install root deps + Playwright browser
+# 2. Install deps + Playwright browser
 npm install
-npx playwright install chromium        # no --with-deps on Windows
+npx playwright install chromium
 
-# Build bridge
+# 3. Build bridge
 cd bridge
 npm install
 npm run build
 cd ..
 
-# Configure .env files
+# 4. Configure .env files
 copy .env.example .env
-# Edit .env in Notepad — add app credentials
+notepad .env          # add your app credentials
 
 copy bridge\.env.example bridge\.env
-# Edit bridge\.env — add ANTHROPIC_API_KEY
+notepad bridge\.env   # add ANTHROPIC_API_KEY
 
-# Start bridge (in a separate PowerShell window — keep it open)
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd $env:USERPROFILE\anthropic\bridge; npm start"
+# 5. Start bridge (keep this window open)
+cd bridge
+npm start
 ```
 
 ---
 
-### Daily workflow on Windows
+### Daily workflow
+
+Open **two PowerShell windows**:
 
 ```powershell
-# Terminal 1 — start bridge (keep open)
+# Window 1 — bridge (keep open while working)
 cd $env:USERPROFILE\anthropic\bridge
 npm start
+```
 
-# Terminal 2 — generate specs
+```powershell
+# Window 2 — generate and test
 cd $env:USERPROFILE\anthropic
-node generate.js bridge\test-cases\the-internet.md
+
+# Generate specs from .md file
+node generate.js bridge/test-cases/the-internet.md
 
 # Run tests
 npx playwright test --project=public-chromium
 
-# View report (opens in browser automatically)
+# View HTML report (opens in browser)
 npx playwright show-report
 ```
-
-> **Path note:** Both `\` and `/` work in Node.js on Windows.
-> `node generate.js bridge/test-cases/the-internet.md` works fine.
 
 ---
 
