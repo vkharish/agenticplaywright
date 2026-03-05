@@ -129,15 +129,30 @@ Bridge runs as a persistent HTTP service. n8n (or any tool) calls it.
 
 Same skip-existing default applies. Use `--force` to regenerate all.
 
-### Option C — Corporate n8n with built-in LLM node (no API key on Linux)
+### Option C — Corporate n8n LLM node (no API key on bridge machine)
 
-n8n handles the Claude call using its own managed key. Bridge only does Playwright + file writing.
+n8n handles the Claude call using its own managed credential. Bridge does Playwright + prompt building + file writing. **No `ANTHROPIC_API_KEY` needed on the bridge.**
 
 ```
-n8n: /snapshot → LLM Node (Claude, corporate key) → /write-spec → .spec.ts
+Webhook → bridge/snapshot → bridge/build-prompt → n8n LLM Node (corporate key) → bridge/write-spec
 ```
 
-**Use this when:** your corporate n8n already has Claude access and you can't manage API keys yourself.
+**Use this when:** your corporate n8n already has Claude/OpenAI access and the API key is managed by IT, not the QA engineer.
+
+**How credentials stay secure:**
+- n8n sends `credentialsPrefix: "MY_APP"` — never the actual password
+- Bridge resolves `MY_APP_USERNAME` / `MY_APP_PASSWORD` from its own `.env`
+- Raw passwords never leave the bridge machine
+
+**New bridge endpoints used by this flow:**
+
+| Endpoint | What it does |
+|----------|-------------|
+| `POST /snapshot` | Navigates, executes steps, returns accessibility tree. Resolves credentials from `credentialsPrefix`. |
+| `POST /build-prompt` | Formats the Claude prompt from snapshot output. No API key. Returns prompt string for n8n LLM node. |
+| `POST /write-spec` | Receives spec text from n8n LLM node, writes `.spec.ts` to `tests/zephyr/`. |
+
+**n8n workflow file:** `bridge/n8n/corporate-llm-workflow.json` — imported by `setup.sh`
 
 ---
 
