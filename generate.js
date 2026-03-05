@@ -7,11 +7,12 @@
  * tests/zephyr/.
  *
  * Usage:
- *   node generate.js [path/to/test-cases.md] [--skip-existing]
+ *   node generate.js [path/to/test-cases.md] [--force]
  *
  * Flags:
- *   --skip-existing   Skip any test case whose .spec.ts already exists in tests/zephyr/.
- *                     Use this on subsequent runs — only new test cases get generated.
+ *   --force   Regenerate ALL specs, even ones that already exist.
+ *             Default behaviour is to skip existing specs — only new test cases
+ *             in the .md file get generated.
  *
  * Requires in .env (or exported in shell):
  *   ANTHROPIC_API_KEY=sk-ant-...
@@ -27,9 +28,9 @@ require("dotenv").config({ path: require("path").join(__dirname, "bridge", ".env
 const fs   = require("fs");
 const path = require("path");
 
-const args          = process.argv.slice(2);
-const SKIP_EXISTING = args.includes("--skip-existing");
-const MD_ARG        = args.find(a => !a.startsWith("--"));
+const args  = process.argv.slice(2);
+const FORCE = args.includes("--force");
+const MD_ARG = args.find(a => !a.startsWith("--"));
 
 const SCRIPT_DIR = __dirname;
 const SPECS_OUT  = path.resolve(process.env.SPECS_OUT_DIR ?? path.join(SCRIPT_DIR, "tests", "zephyr"));
@@ -313,8 +314,8 @@ async function main() {
   const browser = await chromium.launch({ headless: true });
 
   console.log(`\nFound ${cases.length} test case(s) in ${MD_FILE}`);
-  if (SKIP_EXISTING) console.log(`[--skip-existing] Already-generated specs will be skipped.\n`);
-  else console.log();
+  if (FORCE) console.log(`[--force] Regenerating all specs.\n`);
+  else console.log(`[default] Skipping specs that already exist. Use --force to regenerate all.\n`);
 
   let passed = 0, failed = 0, skipped = 0;
 
@@ -322,8 +323,8 @@ async function main() {
     const { testId, name, url, description, credentialsPrefix, steps } = cases[i];
     console.log(`  [${i + 1}/${cases.length}] ${testId} — ${name}`);
 
-    // Skip if spec already exists and --skip-existing flag is set
-    if (SKIP_EXISTING) {
+    // By default skip specs that already exist — use --force to regenerate
+    if (!FORCE) {
       const specFile = path.join(SPECS_OUT, `${testId}.spec.ts`);
       if (fs.existsSync(specFile)) {
         console.log(`         → skipped (spec already exists)\n`);
@@ -373,8 +374,7 @@ async function main() {
   }
 
   await browser.close();
-  const summary = [`Done: ${passed} passed`, `${failed} failed`];
-  if (SKIP_EXISTING) summary.push(`${skipped} skipped (already existed)`);
+  const summary = [`Done: ${passed} passed`, `${failed} failed`, `${skipped} skipped`];
   console.log(summary.join(", ") + ".");
 }
 
