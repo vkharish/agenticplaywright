@@ -329,14 +329,37 @@ node generate.js bridge/test-cases/your-app.md
 npx playwright test --project=chromium
 ```
 
-### Day 4 — Wire up corporate n8n
+### Day 4 — Wire up corporate n8n (Option C)
 
-Import the bridge workflows into your corporate n8n:
+Import all 5 bridge workflows into your corporate n8n:
 ```bash
-N8N_API_KEY=<key-from-n8n-ui> bash bridge/n8n/setup.sh
+N8N_API_KEY=<key-from-n8n-ui> N8N_URL=http://<n8n-host>:5678 bash bridge/n8n/setup.sh
 ```
 
-Then from your Windows browser, open n8n and run workflows manually or via Zephyr webhooks.
+After import, one manual step in n8n UI:
+- Open **Bridge — Generate Spec via Corporate LLM**
+- Click the `Claude Sonnet` sub-node → select your existing Anthropic credential
+
+Ensure app credentials are in `~/anthropic/.env` on the bridge machine:
+```bash
+MY_APP_USERNAME=qa@yourcompany.com
+MY_APP_PASSWORD=your_password
+```
+
+Trigger spec generation by POSTing to the webhook:
+```json
+POST http://<n8n-host>:5678/webhook/bridge-generate-llm
+{
+  "testId": "QA-MYAPP-01",
+  "url": "https://myapp.com/login",
+  "suiteName": "Login Page",
+  "description": "Main login form",
+  "credentialsPrefix": "MY_APP",
+  "steps": ["login"]
+}
+```
+
+No API key needed on the bridge — n8n uses the corporate credential. Raw passwords never pass through n8n.
 
 ---
 
