@@ -12,6 +12,8 @@
  * Flags:
  *   --snapshot-only   Only take snapshots, skip spec generation.
  *                     Use this to test the bridge without an API key.
+ *   --skip-existing   Skip any test case whose .spec.ts already exists in tests/zephyr/.
+ *                     Use this on subsequent runs — only new test cases get generated.
  *
  * Windows:
  *   node bridge\run-from-md.js bridge\test-cases\my-app.md
@@ -29,8 +31,9 @@ const path = require("path");
 try { require("dotenv").config({ path: path.resolve(__dirname, "..", ".env") }); } catch (_) {}
 try { require("dotenv").config({ path: path.resolve(__dirname, ".env") }); } catch (_) {}
 
-const args         = process.argv.slice(2);
+const args          = process.argv.slice(2);
 const SNAPSHOT_ONLY = args.includes("--snapshot-only");
+const SKIP_EXISTING = args.includes("--skip-existing");
 const MD_ARG        = args.find(a => !a.startsWith("--"));
 
 const BRIDGE_URL   = process.env.BRIDGE_URL    ?? "http://localhost:3000";
@@ -132,18 +135,28 @@ async function main() {
     process.exit(1);
   }
 
-  if (SNAPSHOT_ONLY) {
-    console.log(`\n[snapshot-only mode — spec generation skipped]\n`);
-  }
-  console.log(`Found ${cases.length} test case(s) in ${MD_FILE}\n`);
+  if (SNAPSHOT_ONLY) console.log(`\n[snapshot-only mode — spec generation skipped]`);
+  if (SKIP_EXISTING) console.log(`\n[--skip-existing] Already-generated specs will be skipped.`);
+  console.log(`\nFound ${cases.length} test case(s) in ${MD_FILE}\n`);
 
-  let passed = 0, failed = 0;
+  let passed = 0, failed = 0, skipped = 0;
 
   for (let i = 0; i < cases.length; i++) {
     const { testId, name, url, description, credentialsPrefix, steps } = cases[i];
     console.log(`  [${i + 1}/${cases.length}] ${testId} — ${name}`);
     console.log(`         ${description}`);
     if (steps.length > 0) console.log(`         Steps: ${steps.join(" → ")}`);
+
+    // Skip if spec already exists and --skip-existing flag is set
+    if (SKIP_EXISTING && !SNAPSHOT_ONLY) {
+      const specFile = path.join(SPECS_OUT, `${testId}.spec.ts`);
+      if (fs.existsSync(specFile)) {
+        console.log(`         → skipped (spec already exists)\n`);
+        skipped++;
+        continue;
+      }
+    }
+
     process.stdout.write(`         Snapshot …`);
 
     // Resolve form credentials from env (used by 'login' step)
@@ -203,7 +216,9 @@ async function main() {
     console.log();
   }
 
-  console.log(`Done: ${passed} passed, ${failed} failed.`);
+  const summary = [`Done: ${passed} passed`, `${failed} failed`];
+  if (SKIP_EXISTING) summary.push(`${skipped} skipped (already existed)`);
+  console.log(summary.join(", ") + ".");
   if (SNAPSHOT_ONLY) {
     console.log(`\nSnapshots saved to: ${SNAP_OUT}`);
     console.log(`Run without --snapshot-only when Claude API key is available to generate specs.`);

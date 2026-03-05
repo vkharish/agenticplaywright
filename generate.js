@@ -7,7 +7,11 @@
  * tests/zephyr/.
  *
  * Usage:
- *   node generate.js [path/to/test-cases.md]
+ *   node generate.js [path/to/test-cases.md] [--skip-existing]
+ *
+ * Flags:
+ *   --skip-existing   Skip any test case whose .spec.ts already exists in tests/zephyr/.
+ *                     Use this on subsequent runs — only new test cases get generated.
  *
  * Requires in .env (or exported in shell):
  *   ANTHROPIC_API_KEY=sk-ant-...
@@ -23,10 +27,14 @@ require("dotenv").config({ path: require("path").join(__dirname, "bridge", ".env
 const fs   = require("fs");
 const path = require("path");
 
+const args          = process.argv.slice(2);
+const SKIP_EXISTING = args.includes("--skip-existing");
+const MD_ARG        = args.find(a => !a.startsWith("--"));
+
 const SCRIPT_DIR = __dirname;
 const SPECS_OUT  = path.resolve(process.env.SPECS_OUT_DIR ?? path.join(SCRIPT_DIR, "tests", "zephyr"));
 const SNAP_OUT   = path.join(SCRIPT_DIR, "bridge", "snapshots");
-const MD_FILE    = path.resolve(process.argv[2] ?? path.join(SCRIPT_DIR, "bridge", "test-cases", "the-internet.md"));
+const MD_FILE    = path.resolve(MD_ARG ?? path.join(SCRIPT_DIR, "bridge", "test-cases", "the-internet.md"));
 
 // ── interactive roles worth surfacing as locator suggestions ─────────────────
 const INTERACTIVE_ROLES = new Set([
@@ -304,13 +312,25 @@ async function main() {
   const { chromium } = require("playwright");
   const browser = await chromium.launch({ headless: true });
 
-  console.log(`\nFound ${cases.length} test case(s) in ${MD_FILE}\n`);
+  console.log(`\nFound ${cases.length} test case(s) in ${MD_FILE}`);
+  if (SKIP_EXISTING) console.log(`[--skip-existing] Already-generated specs will be skipped.\n`);
+  else console.log();
 
-  let passed = 0, failed = 0;
+  let passed = 0, failed = 0, skipped = 0;
 
   for (let i = 0; i < cases.length; i++) {
     const { testId, name, url, description, credentialsPrefix, steps } = cases[i];
     console.log(`  [${i + 1}/${cases.length}] ${testId} — ${name}`);
+
+    // Skip if spec already exists and --skip-existing flag is set
+    if (SKIP_EXISTING) {
+      const specFile = path.join(SPECS_OUT, `${testId}.spec.ts`);
+      if (fs.existsSync(specFile)) {
+        console.log(`         → skipped (spec already exists)\n`);
+        skipped++;
+        continue;
+      }
+    }
     console.log(`         ${description || ""}`);
     if (steps.length > 0) console.log(`         Steps: ${steps.join(" → ")}`);
 
@@ -353,7 +373,9 @@ async function main() {
   }
 
   await browser.close();
-  console.log(`Done: ${passed} passed, ${failed} failed.`);
+  const summary = [`Done: ${passed} passed`, `${failed} failed`];
+  if (SKIP_EXISTING) summary.push(`${skipped} skipped (already existed)`);
+  console.log(summary.join(", ") + ".");
 }
 
 main().catch(err => {
