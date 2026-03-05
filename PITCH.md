@@ -69,6 +69,7 @@ For a team maintaining **100 test cases** with monthly UI changes:
 
 - **Jenkins auto-heal** — when a test fails in Jenkins, the pipeline automatically calls the AI to diagnose the broken locator, suggests the fix in the build log, and saves it as a downloadable artifact. QA reviews, updates one line, re-runs. No debugging, no DOM inspection.
 - **Zero silent test debt** — failures are never left as "flaky" and ignored. Every failure produces an AI-suggested fix within the same Jenkins build.
+- **No accidental regeneration** — the generator automatically skips specs that already exist. Running it twice never overwrites working tests or wastes API calls. A deliberate `--force` flag is required to regenerate.
 - **No knowledge lock-in** — specs are plain TypeScript. Any developer or QA can read, modify, and understand them. AI is only involved at generation time.
 - **No vendor lock-in** — built on Playwright (Microsoft, open source), standard TypeScript, and the Anthropic API. Each layer is independently replaceable.
 - **Credentials never exposed** — all usernames and passwords live in `.env` files, never in code, never committed to Git.
