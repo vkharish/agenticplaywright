@@ -73,6 +73,7 @@ For a team maintaining **100 test cases** with monthly UI changes:
 - **No knowledge lock-in** — specs are plain TypeScript. Any developer or QA can read, modify, and understand them. AI is only involved at generation time.
 - **No vendor lock-in** — built on Playwright (Microsoft, open source), standard TypeScript, and the Anthropic API. Each layer is independently replaceable.
 - **Credentials never exposed** — all usernames and passwords live in `.env` files, never in code, never committed to Git.
+- **No API key management for QA engineers** — when using corporate n8n (Option C), the Anthropic API key is configured once by IT inside n8n and never touched by the QA team. App passwords never leave the bridge server — n8n only ever sees a prefix string like `MY_APP`, not the actual credentials.
 
 ---
 
