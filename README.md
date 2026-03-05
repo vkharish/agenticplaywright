@@ -107,6 +107,16 @@ No bridge, no Docker, no n8n. One script does everything.
 
 **Use this when:** testing locally, getting started, no n8n yet.
 
+**Skips existing specs automatically** — only generates specs for test cases that don't already have a `.spec.ts`. Safe to run repeatedly; never overwrites working tests or wastes API calls.
+
+```bash
+# Normal run — only generates new test cases
+node generate.js bridge/test-cases/my-app.md
+
+# Regenerate everything (after a major page redesign)
+node generate.js bridge/test-cases/my-app.md --force
+```
+
 ### Option B — Bridge + `run-from-md.js` (needed for n8n)
 
 Bridge runs as a persistent HTTP service. n8n (or any tool) calls it.
@@ -116,6 +126,8 @@ Bridge runs as a persistent HTTP service. n8n (or any tool) calls it.
 ```
 
 **Use this when:** wiring up corporate n8n, CI self-healing, or sharing one browser across many callers.
+
+Same skip-existing default applies. Use `--force` to regenerate all.
 
 ### Option C — Corporate n8n with built-in LLM node (no API key on Linux)
 
