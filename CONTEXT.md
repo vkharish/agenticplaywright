@@ -80,6 +80,15 @@ Flow: `.md file` → Playwright (direct) → Claude API → `.spec.ts`
 
 Use when: getting started, no n8n, testing locally.
 
+**Default behaviour — skips existing specs automatically.**
+Only generates specs for test cases that don't already have a `.spec.ts` in `tests/zephyr/`.
+No flag needed — just run it. New test cases in the `.md` file get picked up automatically.
+
+```bash
+# Deliberately regenerate everything (e.g. after a major page redesign)
+node generate.js bridge/test-cases/the-internet.md --force
+```
+
 ### Option B — Bridge + `run-from-md.js`
 
 ```bash
@@ -90,6 +99,8 @@ node bridge/run-from-md.js bridge/test-cases/the-internet.md
 Flow: `.md file` → HTTP → `bridge /snapshot` → `bridge /generate-spec` → `.spec.ts`
 
 Use when: n8n is wired up, or wanting persistent browser singleton.
+
+Same skip-existing default applies. Use `--force` to regenerate all.
 
 Also supports snapshot-only mode (no Claude API needed):
 ```bash
@@ -535,13 +546,17 @@ cd $env:USERPROFILE\anthropic\bridge
 npm start
 
 # Generate specs — standalone (no bridge)
+# Automatically skips specs that already exist — only new test cases get generated
 cd $env:USERPROFILE\anthropic
 node generate.js bridge/test-cases/the-internet.md
 
-# Generate specs — via bridge
+# Force regenerate ALL specs (use only after a major page redesign)
+node generate.js bridge/test-cases/the-internet.md --force
+
+# Generate specs — via bridge (same skip-existing default applies)
 node bridge/run-from-md.js bridge/test-cases/the-internet.md
 
-# Snapshot only (no Claude API needed)
+# Snapshot only (no Claude API needed — useful to test steps/navigation)
 node bridge/run-from-md.js bridge/test-cases/the-internet.md --snapshot-only
 
 # Run tests
